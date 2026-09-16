@@ -151,8 +151,8 @@
 <script>
 /* ============ SUPABASE CONFIG ============ */
 // Fill these in from Supabase → Project Settings → API, then re-save/upload this file.
-const SUPABASE_URL = 'YOUR_SUPABASE_PROJECT_URL';
-const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+const SUPABASE_URL = 'https://ikefzsvqgmivrsozbfsi.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_l5Yh6aMF4I4W6AqR3HAlBg_NidysDfA';
 const sb = (SUPABASE_URL.startsWith('http')) ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 const CONFIG_MISSING = !sb;
 
@@ -200,19 +200,43 @@ function invoiceToRow(inv){
   };
 }
 
+function rowToStandalone(r){
+  return {
+    id: r.id, invoiceNumber: r.invoice_number, billedTo: r.billed_to, description: r.description,
+    amount: r.amount, sentDate: r.sent_date, receivedDate: r.received_date, notes: r.notes
+  };
+}
+function standaloneToRow(s){
+  return {
+    id: s.id, invoice_number: s.invoiceNumber, billed_to: s.billedTo, description: s.description,
+    amount: s.amount || 0, sent_date: s.sentDate || null, received_date: s.receivedDate || null, notes: s.notes
+  };
+}
+
 async function loadAllData(){
-  const [orgRes, staffRes, grantsRes, invRes] = await Promise.all([
+  const [orgRes, staffRes, grantsRes, invRes, standaloneRes] = await Promise.all([
     sb.from('org_settings').select('*').eq('id', 1).maybeSingle(),
     sb.from('staff_public').select('*'),
     sb.from('grants').select('*'),
     sb.from('invoices').select('*'),
+    sb.from('standalone_invoices').select('*'),
   ]);
   return {
     orgSettings: orgRes.data ? { orgName: orgRes.data.org_name||'', ein: orgRes.data.ein||'', address: orgRes.data.address||'', fyStartMonth: orgRes.data.fy_start_month||10 } : { orgName:'', ein:'', address:'', fyStartMonth:10 },
     staff: (staffRes.data||[]).map(s=>({id:s.id, name:s.name, role:s.role})),
     grants: (grantsRes.data||[]).map(rowToGrant),
     invoices: (invRes.data||[]).map(rowToInvoice),
+    standaloneInvoices: (standaloneRes.data||[]).map(rowToStandalone),
   };
+}
+async function saveStandaloneInvoice(s){
+  const row = standaloneToRow(s);
+  const { error } = await sb.from('standalone_invoices').upsert(row);
+  if(error){ console.error(error); alert('Could not save invoice: '+error.message); return false; }
+  return true;
+}
+async function deleteStandaloneInvoiceRow(id){
+  await sb.from('standalone_invoices').delete().eq('id', id);
 }
 async function saveOrgSettings(orgSettings){
   await sb.from('org_settings').update({
@@ -249,6 +273,7 @@ let state = {
   staff: [],
   grants: [],
   invoices: [],
+  standaloneInvoices: [],
   currentUser: null,
   pinBuffer: '',
   loginName: '',
@@ -275,6 +300,7 @@ async function init(){
     state.staff = data.staff;
     state.grants = data.grants;
     state.invoices = data.invoices;
+    state.standaloneInvoices = data.standaloneInvoices;
   }catch(e){
     console.error(e);
     state.loadError = 'Could not connect to Supabase. Check the SUPABASE_URL / SUPABASE_ANON_KEY at the top of the script, and that the schema SQL has been run.';
@@ -481,7 +507,7 @@ function renderShell(){
     ['dashboard','Dashboard'],
     ['grants','Grants'],
     ['reporting','Reporting calendar'],
-    ['reimbursements','Reimbursements'],
+    ['reimbursements','Reimbursements/Invoices'],
   ];
   if(isAdmin) navItems.push(['admin','Admin']);
   return `
@@ -623,11 +649,13 @@ function renderModal(){
   if(state.modal.type==='grant') wrap.innerHTML = modalGrantHTML();
   if(state.modal.type==='invoice') wrap.innerHTML = modalInvoiceHTML();
   if(state.modal.type==='staff') wrap.innerHTML = modalStaffHTML();
+  if(state.modal.type==='standalone') wrap.innerHTML = modalStandaloneHTML();
   document.body.appendChild(wrap);
   wrap.onclick = (e)=>{ if(e.target===wrap){ state.modal=null; wrap.remove(); } };
   if(state.modal.type==='grant') attachGrantModalEvents();
   if(state.modal.type==='invoice') attachInvoiceModalEvents();
   if(state.modal.type==='staff') attachStaffModalEvents();
+  if(state.modal.type==='standalone') attachStandaloneModalEvents();
 }
 function modalGrantHTML(){
   const d = state.modal.draft;
@@ -1149,19 +1177,21 @@ function printReimbursementReport(){
   const groups = {};
   state.invoices.forEach(inv=>{
     const label = quarterLabel(inv.sentDate || inv.periodTo, fy);
-    (groups[label]=groups[label]||[]).push(inv);
+    const g = getGrant(inv.grantId);
+    (groups[label]=groups[label]||[]).push({name: g? g.funderName+' — '+g.projectName : 'Unknown', invoiceNumber: inv.invoiceNumber, amount: inv.total, sentDate: inv.sentDate, receivedDate: inv.receivedDate});
+  });
+  state.standaloneInvoices.forEach(s=>{
+    const label = quarterLabel(s.sentDate, fy);
+    (groups[label]=groups[label]||[]).push({name: (s.billedTo||'Standalone')+' (standalone)', invoiceNumber: s.invoiceNumber, amount: s.amount, sentDate: s.sentDate, receivedDate: s.receivedDate});
   });
   const body = Object.keys(groups).map(label=>{
-    const invs = groups[label];
-    const total = invs.reduce((s,i)=>s+i.total,0);
-    const rows = invs.map(inv=>{
-      const g = getGrant(inv.grantId);
-      return `<tr><td>${esc(g? g.funderName+' — '+g.projectName : 'Unknown')}</td><td>${esc(inv.invoiceNumber)}</td><td style="text-align:right;">${fmtMoney(inv.total)}</td><td>${fmtDate(inv.sentDate)}</td><td>${inv.receivedDate? fmtDate(inv.receivedDate):'pending'}</td></tr>`;
-    }).join('');
+    const items = groups[label];
+    const total = items.reduce((s,i)=>s+i.amount,0);
+    const rows = items.map(i=> `<tr><td>${esc(i.name)}</td><td>${esc(i.invoiceNumber)}</td><td style="text-align:right;">${fmtMoney(i.amount)}</td><td>${fmtDate(i.sentDate)}</td><td>${i.receivedDate? fmtDate(i.receivedDate):'pending'}</td></tr>`).join('');
     return `<h3 style="margin-top:18px;font-size:13px;">${esc(label)} — ${fmtMoney(total)} requested</h3>
-      <table class="inv-table" style="width:100%;"><thead><tr><th>Grant</th><th>Inv #</th><th style="text-align:right;">Amount</th><th>Sent</th><th>Received</th></tr></thead><tbody>${rows}</tbody></table>`;
+      <table class="inv-table" style="width:100%;"><thead><tr><th>Grant / Billed to</th><th>Inv #</th><th style="text-align:right;">Amount</th><th>Sent</th><th>Received</th></tr></thead><tbody>${rows}</tbody></table>`;
   }).join('');
-  showPrintSheet(`<div class="inv-header"><h2>Reimbursement Report</h2><div>${esc(state.orgSettings.orgName)}</div><div>${new Date().toLocaleDateString()}</div></div>${body || '<p>No invoices recorded yet.</p>'}`);
+  showPrintSheet(`<div class="inv-header"><h2>Reimbursement/Invoice Report</h2><div>${esc(state.orgSettings.orgName)}</div><div>${new Date().toLocaleDateString()}</div></div>${body || '<p>No invoices recorded yet.</p>'}`);
 }
 
 /* ============ EXCEL EXPORT (SheetJS) ============ */
@@ -1244,13 +1274,17 @@ function exportInvoicesExcel(gid){
 }
 function exportReimbursementsExcel(){
   const fy = state.orgSettings.fyStartMonth||10;
-  const rows = [['Quarter','Grant','Agreement #','Invoice #','Amount','Sent Date','Received Date']];
+  const rows = [['Quarter','Type','Grant / Billed to','Agreement #','Invoice #','Amount','Sent Date','Received Date']];
   state.invoices.forEach(inv=>{
     const g = getGrant(inv.grantId);
     const label = quarterLabel(inv.sentDate || inv.periodTo, fy);
-    rows.push([label, g? g.funderName+' — '+g.projectName : 'Unknown', g? g.agreementNumber:'', inv.invoiceNumber, inv.total, inv.sentDate, inv.receivedDate]);
+    rows.push([label, 'Grant', g? g.funderName+' — '+g.projectName : 'Unknown', g? g.agreementNumber:'', inv.invoiceNumber, inv.total, inv.sentDate, inv.receivedDate]);
   });
-  downloadExcel('reimbursements.xlsx', [{name:'Reimbursements', rows}]);
+  state.standaloneInvoices.forEach(s=>{
+    const label = quarterLabel(s.sentDate, fy);
+    rows.push([label, 'Standalone', s.billedTo||'', '', s.invoiceNumber, s.amount, s.sentDate, s.receivedDate]);
+  });
+  downloadExcel('reimbursements-invoices.xlsx', [{name:'Reimbursements-Invoices', rows}]);
 }
 
 /* ============ REPORTING CALENDAR ============ */
@@ -1269,25 +1303,32 @@ function renderReimbursements(){
     const label = quarterLabel(inv.sentDate || inv.periodTo, fy);
     if(!groups[label]) groups[label]=[];
     const g = getGrant(inv.grantId);
-    groups[label].push({...inv, grantName: g? `${g.funderName} — ${g.projectName}`:'Unknown grant', agreementNumber: g? g.agreementNumber:''});
+    groups[label].push({kind:'grant', id:inv.id, name: g? `${g.funderName} — ${g.projectName}`:'Unknown grant', sub: g? g.agreementNumber:'', invoiceNumber: inv.invoiceNumber, amount: inv.total, sentDate: inv.sentDate, receivedDate: inv.receivedDate});
+  });
+  state.standaloneInvoices.forEach(s=>{
+    const label = quarterLabel(s.sentDate, fy);
+    if(!groups[label]) groups[label]=[];
+    groups[label].push({kind:'standalone', id:s.id, name: s.billedTo || 'Standalone invoice', sub: s.description||'', invoiceNumber: s.invoiceNumber, amount: s.amount, sentDate: s.sentDate, receivedDate: s.receivedDate});
   });
   const labels = Object.keys(groups).sort((a,b)=>{
-    const da = groups[a][0]?.sentDate || ''; const db = groups[b][0]?.sentDate || '';
+    const da = groups[a].map(x=>x.sentDate).filter(Boolean).sort().pop() || '';
+    const db = groups[b].map(x=>x.sentDate).filter(Boolean).sort().pop() || '';
     return new Date(db) - new Date(da);
   });
-  return `<div class="page-head"><div><h2>Reimbursements</h2><div class="page-sub">Invoices grouped by quarter · fiscal year starts month ${fy}</div></div>
+  return `<div class="page-head"><div><h2>Reimbursements/Invoices</h2><div class="page-sub">Grant invoices and standalone invoices, grouped by quarter · fiscal year starts month ${fy}</div></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
       <button class="btn-ghost btn" id="export-reimb-excel">Export (Excel)</button>
       <button class="btn-ghost btn" id="export-reimb-pdf">Export (PDF)</button>
+      <button class="btn" id="add-standalone-btn">+ Add standalone invoice</button>
     </div></div>
   ${labels.length? labels.map(label=>{
-    const invs = groups[label];
-    const total = invs.reduce((s,i)=>s+i.total,0);
-    const received = invs.filter(i=>i.receivedDate).reduce((s,i)=>s+i.total,0);
+    const items = groups[label];
+    const total = items.reduce((s,i)=>s+i.amount,0);
+    const received = items.filter(i=>i.receivedDate).reduce((s,i)=>s+i.amount,0);
     return `<div class="quarter-block card">
       <h4>${label} — ${fmtMoney(total)} requested, ${fmtMoney(received)} received</h4>
-      <table><thead><tr><th>Grant</th><th>Inv. #</th><th class="num">Amount</th><th>Sent</th><th>Received</th></tr></thead>
-      <tbody>${invs.map(i=>`<tr><td>${esc(i.grantName)}<br><span class="mono" style="color:var(--moss);font-size:11px;">${esc(i.agreementNumber)}</span></td><td class="mono">${esc(i.invoiceNumber)}</td><td class="num">${fmtMoney(i.total)}</td><td>${fmtDate(i.sentDate)}</td><td>${i.receivedDate?fmtDate(i.receivedDate):'pending'}</td></tr>`).join('')}</tbody></table>
+      <table><thead><tr><th>Grant / Billed to</th><th>Inv. #</th><th class="num">Amount</th><th>Sent</th><th>Received</th><th></th></tr></thead>
+      <tbody>${items.map(i=>`<tr><td>${esc(i.name)}${i.sub?`<br><span class="mono" style="color:var(--moss);font-size:11px;">${esc(i.sub)}</span>`:''}${i.kind==='standalone'?'<span class="status-pill" style="margin-left:6px;background:var(--brass-light);color:#6B4A17;">Standalone</span>':''}</td><td class="mono">${esc(i.invoiceNumber)}</td><td class="num">${fmtMoney(i.amount)}</td><td>${fmtDate(i.sentDate)}</td><td>${i.receivedDate?fmtDate(i.receivedDate):'pending'}</td><td>${i.kind==='standalone'?`<button class="link-btn" data-print-standalone="${i.id}">Print</button> · <button class="link-btn" data-edit-standalone="${i.id}">Edit</button>`:''}</td></tr>`).join('')}</tbody></table>
     </div>`;
   }).join('') : '<div class="empty">No invoices recorded yet.</div>'}
   `;
@@ -1297,6 +1338,90 @@ function attachReimbursementsEvents(){
   if(exExcel) exExcel.onclick = exportReimbursementsExcel;
   const exPdf = document.getElementById('export-reimb-pdf');
   if(exPdf) exPdf.onclick = printReimbursementReport;
+  const addStandalone = document.getElementById('add-standalone-btn');
+  if(addStandalone) addStandalone.onclick = ()=> openStandaloneModal(null);
+  document.querySelectorAll('[data-edit-standalone]').forEach(b=> b.onclick = ()=> openStandaloneModal(b.dataset.editStandalone));
+  document.querySelectorAll('[data-print-standalone]').forEach(b=> b.onclick = ()=> printStandaloneInvoice(b.dataset.printStandalone));
+}
+
+/* ============ STANDALONE INVOICE MODAL ============ */
+function openStandaloneModal(id){
+  const existing = id ? state.standaloneInvoices.find(s=>s.id===id) : null;
+  const draft = existing ? JSON.parse(JSON.stringify(existing)) : {
+    id: uid(), invoiceNumber:'', billedTo:'', description:'', amount:0, sentDate:'', receivedDate:'', notes:''
+  };
+  state.modal = {type:'standalone', standaloneId:id, draft};
+  render(); renderModal();
+}
+function modalStandaloneHTML(){
+  const d = state.modal.draft;
+  return `<div class="modal">
+    <h3>${state.modal.standaloneId? 'Edit standalone invoice':'Add standalone invoice'}</h3>
+    <div class="row">
+      <div class="field"><label>Invoice #</label><input id="sa-num" value="${escAttr(d.invoiceNumber)}"></div>
+      <div class="field"><label>Amount</label><input id="sa-amount" type="number" step="0.01" value="${d.amount||0}"></div>
+    </div>
+    <div class="field"><label>Billed to (organization)</label><input id="sa-billedto" value="${escAttr(d.billedTo)}" placeholder="Who this invoice is to"></div>
+    <div class="field"><label>What it's for</label><textarea id="sa-desc" rows="2" placeholder="Description">${esc(d.description)}</textarea></div>
+    <div class="row">
+      <div class="field"><label>Sent date</label><input id="sa-sent" type="date" value="${d.sentDate}"></div>
+      <div class="field"><label>Payment received date</label><input id="sa-recv" type="date" value="${d.receivedDate}"></div>
+    </div>
+    <div class="field"><label>Notes</label><input id="sa-notes" value="${escAttr(d.notes||'')}"></div>
+    <div class="modal-actions">
+      ${state.modal.standaloneId?`<button class="btn-danger btn" id="del-standalone-btn" style="margin-right:auto;">Delete</button>`:''}
+      <button class="btn-ghost btn" id="modal-cancel">Cancel</button>
+      <button class="btn" id="modal-save-standalone">Save invoice</button>
+    </div>
+  </div>`;
+}
+function attachStandaloneModalEvents(){
+  document.getElementById('modal-cancel').onclick = closeModal;
+  const delBtn = document.getElementById('del-standalone-btn');
+  if(delBtn) delBtn.onclick = async ()=>{
+    if(!confirm('Delete this invoice?')) return;
+    await deleteStandaloneInvoiceRow(state.modal.standaloneId);
+    state.standaloneInvoices = state.standaloneInvoices.filter(s=>s.id!==state.modal.standaloneId);
+    state.modal=null; render();
+  };
+  document.getElementById('modal-save-standalone').onclick = async ()=>{
+    const d = state.modal.draft;
+    d.invoiceNumber = document.getElementById('sa-num').value.trim();
+    d.amount = Number(document.getElementById('sa-amount').value)||0;
+    d.billedTo = document.getElementById('sa-billedto').value.trim();
+    d.description = document.getElementById('sa-desc').value;
+    d.sentDate = document.getElementById('sa-sent').value;
+    d.receivedDate = document.getElementById('sa-recv').value;
+    d.notes = document.getElementById('sa-notes').value;
+    const ok = await saveStandaloneInvoice(d);
+    if(!ok) return;
+    const idx = state.standaloneInvoices.findIndex(s=>s.id===d.id);
+    if(idx>=0) state.standaloneInvoices[idx]=d; else state.standaloneInvoices.push(d);
+    state.modal=null;
+    render();
+  };
+}
+function printStandaloneInvoice(id){
+  const s = state.standaloneInvoices.find(x=>x.id===id);
+  const org = state.orgSettings;
+  showPrintSheet(`
+    <div class="inv-header">
+      <h2>Invoice</h2>
+      <div>${esc(org.orgName)}</div>
+      <div>${esc(org.address||'')}</div>
+      ${org.ein? `<div>EIN: ${esc(org.ein)}</div>`:''}
+    </div>
+    <table class="inv-table" style="width:100%;">
+      <tr><td><b>Billed to</b></td><td>${esc(s.billedTo)}</td><td><b>Invoice #</b></td><td>${esc(s.invoiceNumber)}</td></tr>
+      <tr><td><b>Date</b></td><td>${fmtDate(s.sentDate)}</td><td><b>Amount</b></td><td>${fmtMoney(s.amount)}</td></tr>
+    </table>
+    <table class="inv-table" style="width:100%;">
+      <thead><tr><th>What it's for</th></tr></thead>
+      <tbody><tr><td>${esc(s.description)||'—'}</td></tr></tbody>
+    </table>
+    <div class="sig-line">Signature / Date</div>
+    <div class="sig-line" style="margin-top:30px;">Printed Name and Title</div>
+  `);
 }
 
 /* ============ ADMIN ============ */
