@@ -113,8 +113,17 @@
   .due-row{display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid var(--line);}
   .due-row:last-child{border-bottom:none;}
   .due-tag{font-size:10.5px;padding:2px 8px;border-radius:10px;font-weight:600;}
-  .due-tag.soon{background:#F5E7E4;color:var(--rust);}
+  .due-tag.overdue{background:#F5E7E4;color:var(--rust);}
+  .due-tag.warn{background:#F4DCB0;color:#8A5A1E;}
   .due-tag.ok{background:var(--sage);color:var(--forest-dark);}
+  .due-row .mark-btn{background:none;border:1px solid var(--line-strong);border-radius:4px;font-size:11px;padding:3px 9px;color:var(--forest);margin-left:8px;}
+  .due-row .mark-btn:hover{background:var(--sage);}
+  .toggle-row{display:flex;gap:16px;align-items:center;margin:10px 0 16px;}
+  .toggle-row label{margin:0;color:var(--ink);font-weight:500;font-size:13px;}
+  .link-row{display:flex;gap:8px;align-items:center;margin-bottom:8px;}
+  .link-row input{flex:1;}
+  .funder-group-head{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--brass);font-weight:700;margin:24px 0 10px;border-bottom:1px solid var(--line);padding-bottom:6px;}
+  .funder-group-head:first-child{margin-top:0;}
   .staff-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--line);}
   .badge-admin{font-size:10px;background:var(--brass-light);color:#6B4A17;padding:2px 7px;border-radius:8px;margin-left:8px;font-weight:600;}
   .link-btn{background:none;border:none;color:var(--forest);text-decoration:underline;font-size:12.5px;padding:0;}
@@ -142,8 +151,8 @@
 <script>
 /* ============ SUPABASE CONFIG ============ */
 // Fill these in from Supabase → Project Settings → API, then re-save/upload this file.
-const SUPABASE_URL = 'https://ikefzsvqgmivrsozbfsi.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_l5Yh6aMF4I4W6AqR3HAlBg_NidysDfA';
+const SUPABASE_URL = 'YOUR_SUPABASE_PROJECT_URL';
+const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
 const sb = (SUPABASE_URL.startsWith('http')) ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 const CONFIG_MISSING = !sb;
 
@@ -154,7 +163,11 @@ function rowToGrant(r){
     agreementNumber: r.agreement_number, classNumber: r.class_number,
     grantAmount: r.grant_amount, startDate: r.start_date, endDate: r.end_date,
     status: r.status, notes: r.notes,
-    categories: r.categories || [], budgeted: r.budgeted || {}, reporting: r.reporting || {}
+    categories: r.categories || [], budgeted: r.budgeted || {}, reporting: r.reporting || {},
+    trackingMode: r.tracking_mode || 'invoiced',
+    expended: r.expended || {},
+    scs: Object.assign({enabled:false, categories:[], budgeted:{}, expended:{}}, r.scs || {}),
+    links: r.links || []
   };
 }
 function grantToRow(g){
@@ -162,14 +175,19 @@ function grantToRow(g){
     id: g.id, funder_name: g.funderName, project_name: g.projectName,
     agreement_number: g.agreementNumber, class_number: g.classNumber,
     grant_amount: g.grantAmount, start_date: g.startDate || null, end_date: g.endDate || null,
-    status: g.status, notes: g.notes, categories: g.categories, budgeted: g.budgeted, reporting: g.reporting
+    status: g.status, notes: g.notes, categories: g.categories, budgeted: g.budgeted, reporting: g.reporting,
+    tracking_mode: g.trackingMode || 'invoiced',
+    expended: g.expended || {},
+    scs: g.scs || {enabled:false, categories:[], budgeted:{}, expended:{}},
+    links: g.links || []
   };
 }
 function rowToInvoice(r){
   return {
     id: r.id, grantId: r.grant_id, invoiceNumber: r.invoice_number,
     periodFrom: r.period_from, periodTo: r.period_to, amounts: r.amounts || {},
-    indirect: r.indirect, total: r.total, sentDate: r.sent_date, receivedDate: r.received_date, notes: r.notes
+    indirect: r.indirect, total: r.total, sentDate: r.sent_date, receivedDate: r.received_date, notes: r.notes,
+    scsAmounts: r.scs_amounts || {}, scsTotal: r.scs_total || 0
   };
 }
 function invoiceToRow(inv){
@@ -177,7 +195,8 @@ function invoiceToRow(inv){
     id: inv.id, grant_id: inv.grantId, invoice_number: inv.invoiceNumber,
     period_from: inv.periodFrom || null, period_to: inv.periodTo || null, amounts: inv.amounts,
     indirect: inv.indirect || 0, total: inv.total, sent_date: inv.sentDate || null,
-    received_date: inv.receivedDate || null, notes: inv.notes
+    received_date: inv.receivedDate || null, notes: inv.notes,
+    scs_amounts: inv.scsAmounts || {}, scs_total: inv.scsTotal || 0
   };
 }
 
@@ -232,6 +251,7 @@ let state = {
   invoices: [],
   currentUser: null,
   pinBuffer: '',
+  loginName: '',
   loginError: '',
   view: 'dashboard',
   selectedGrantId: null,
@@ -268,14 +288,30 @@ function getGrant(id){ return state.grants.find(g=>g.id===id); }
 function grantInvoices(gid){ return state.invoices.filter(i=>i.grantId===gid).sort((a,b)=> (a.invoiceNumber||0)-(b.invoiceNumber||0)); }
 function expendedByCategory(gid){
   const g = getGrant(gid); if(!g) return {};
+  if(g.trackingMode==='lumpsum'){
+    const out = {}; g.categories.forEach(c=> out[c.id] = Number((g.expended||{})[c.id]||0)); return out;
+  }
   const out = {}; g.categories.forEach(c=> out[c.id]=0);
   grantInvoices(gid).forEach(inv=>{
     g.categories.forEach(c=>{ out[c.id] += Number(inv.amounts[c.id]||0); });
   });
   return out;
 }
+function expendedByScsCategory(gid){
+  const g = getGrant(gid); if(!g || !g.scs || !g.scs.enabled) return {};
+  if(g.trackingMode==='lumpsum'){
+    const out = {}; g.scs.categories.forEach(c=> out[c.id] = Number((g.scs.expended||{})[c.id]||0)); return out;
+  }
+  const out = {}; g.scs.categories.forEach(c=> out[c.id]=0);
+  grantInvoices(gid).forEach(inv=>{
+    g.scs.categories.forEach(c=>{ out[c.id] += Number((inv.scsAmounts||{})[c.id]||0); });
+  });
+  return out;
+}
 function totalBudgeted(g){ return g.categories.reduce((s,c)=> s + Number(g.budgeted[c.id]||0), 0); }
 function totalExpended(gid){ const e = expendedByCategory(gid); return Object.values(e).reduce((s,v)=>s+v,0); }
+function totalScsBudgeted(g){ return (g.scs && g.scs.enabled) ? g.scs.categories.reduce((s,c)=> s + Number(g.scs.budgeted[c.id]||0), 0) : 0; }
+function totalScsExpended(gid){ const e = expendedByScsCategory(gid); return Object.values(e).reduce((s,v)=>s+v,0); }
 function fmtMoney(n){ n = Number(n)||0; return '$' + n.toLocaleString('en-US',{minimumFractionDigits:2, maximumFractionDigits:2}); }
 function fmtDate(d){ if(!d) return '—'; const dt = new Date(d+'T00:00:00'); if(isNaN(dt)) return d; return dt.toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'}); }
 function daysUntil(d){ if(!d) return null; const today = new Date(); today.setHours(0,0,0,0); const dt = new Date(d+'T00:00:00'); return Math.round((dt-today)/86400000); }
@@ -296,11 +332,33 @@ function quarterLabel(dateStr, fyStartMonth){
 function allReportingDues(){
   const items = [];
   state.grants.forEach(g=>{
-    if(g.reporting.performanceNextDue) items.push({grant:g, type:'Performance report', date:g.reporting.performanceNextDue});
-    if(g.reporting.financialNextDue) items.push({grant:g, type:'Financial report', date:g.reporting.financialNextDue});
+    if(g.reporting.performanceNextDue) items.push({grant:g, type:'Performance report', date:g.reporting.performanceNextDue, key:'performance'});
+    if(g.reporting.financialNextDue) items.push({grant:g, type:'Financial report', date:g.reporting.financialNextDue, key:'financial'});
   });
   items.sort((a,b)=> new Date(a.date) - new Date(b.date));
   return items;
+}
+async function markReportSubmitted(gid, key){
+  const g = getGrant(gid); if(!g) return;
+  const today = new Date().toISOString().slice(0,10);
+  if(key==='performance'){ g.reporting.performanceLastSubmitted = today; g.reporting.performanceNextDue = ''; }
+  else { g.reporting.financialLastSubmitted = today; g.reporting.financialNextDue = ''; }
+  const ok = await saveGrant(g);
+  if(!ok) return;
+  const idx = state.grants.findIndex(x=>x.id===gid);
+  if(idx>=0) state.grants[idx]=g;
+  render();
+}
+function groupGrantsByFunder(list){
+  const groups = {};
+  list.forEach(g=>{
+    const key = g.funderName || 'Unspecified funder';
+    if(!groups[key]) groups[key]=[];
+    groups[key].push(g);
+  });
+  return Object.keys(groups).sort((a,b)=> a.localeCompare(b)).map(funder=>({
+    funder, grants: groups[funder].sort((a,b)=> (a.projectName||'').localeCompare(b.projectName||''))
+  }));
 }
 
 /* ============ AUTH ============ */
@@ -312,7 +370,7 @@ function handlePinDigit(d){
 }
 function handlePinClear(){ state.pinBuffer=''; render(); }
 function handlePinBackspace(){ state.pinBuffer = state.pinBuffer.slice(0,-1); render(); }
-function logout(){ state.currentUser=null; state.pinBuffer=''; state.view='dashboard'; render(); }
+function logout(){ state.currentUser=null; state.pinBuffer=''; state.loginName=''; state.view='dashboard'; render(); }
 async function attemptLoginAsync(name){
   const { data, error } = await sb.rpc('verify_login', { p_name: name, p_pin: state.pinBuffer });
   if(error || !data || data.length===0){
@@ -329,6 +387,7 @@ async function attemptLoginAsync(name){
 /* ============ RENDER ROOT ============ */
 function render(){
   const root = document.getElementById('root');
+  if(!state.modal){ document.querySelectorAll('.modal-bg').forEach(el=>el.remove()); }
   if(CONFIG_MISSING){ root.innerHTML = renderConfigMissing(); return; }
   if(state.loading){ root.innerHTML = '<div style="padding:60px;text-align:center;color:#5C7A63;">Loading ledger…</div>'; return; }
   if(state.loadError){ root.innerHTML = `<div style="padding:60px;max-width:520px;margin:0 auto;text-align:center;color:#9C4A3B;">${esc(state.loadError)}</div>`; return; }
@@ -382,9 +441,13 @@ function renderLogin(){
   <div class="login-wrap">
     <div class="login-box">
       <h1>${state.orgSettings.orgName || 'Grants Ledger'}</h1>
-      <p class="login-sub">Enter your name and PIN to continue.</p>
-      <div class="field"><label>Name</label><input id="login-name" list="staff-names" placeholder="Start typing your name"></div>
-      <datalist id="staff-names">${state.staff.map(s=>`<option value="${escAttr(s.name)}">`).join('')}</datalist>
+      <p class="login-sub">Select your name and enter your PIN to continue.</p>
+      <div class="field"><label>Name</label>
+        <select id="login-name" style="width:100%;">
+          <option value="">Select your name…</option>
+          ${state.staff.map(s=>`<option value="${escAttr(s.name)}" ${state.loginName===s.name?'selected':''}>${esc(s.name)}</option>`).join('')}
+        </select>
+      </div>
       <label style="margin-top:14px;">PIN</label>
       <div class="pin-dots">${[0,1,2,3,4,5].map(i=>`<span class="${i<state.pinBuffer.length?'filled':''}"></span>`).join('')}</div>
       <div class="keypad">
@@ -399,13 +462,13 @@ function renderLogin(){
   </div>`;
 }
 function attachLoginEvents(){
+  document.getElementById('login-name').onchange = (e)=>{ state.loginName = e.target.value; };
   document.querySelectorAll('.keypad button[data-d]').forEach(b=> b.onclick = ()=> handlePinDigit(b.dataset.d));
   document.getElementById('pin-clear').onclick = handlePinClear;
   document.getElementById('pin-back').onclick = handlePinBackspace;
   document.getElementById('login-submit').onclick = ()=>{
-    const name = document.getElementById('login-name').value.trim();
-    if(!name){ state.loginError='Enter your name.'; render(); return; }
-    attemptLoginAsync(name);
+    if(!state.loginName){ state.loginError='Select your name.'; render(); return; }
+    attemptLoginAsync(state.loginName);
   };
 }
 function escAttr(s){ return (s||'').replace(/"/g,'&quot;'); }
@@ -466,9 +529,10 @@ function attachViewEvents(){
 /* ============ DASHBOARD ============ */
 function renderDashboard(){
   const active = state.grants.filter(g=> g.status!=='Closed');
-  const totalBudget = active.reduce((s,g)=> s+totalBudgeted(g),0);
-  const totalSpent = active.reduce((s,g)=> s+totalExpended(g.id),0);
+  const totalBudget = active.reduce((s,g)=> s+totalBudgeted(g)+totalScsBudgeted(g),0);
+  const totalSpent = active.reduce((s,g)=> s+totalExpended(g.id)+totalScsExpended(g.id),0);
   const dues = allReportingDues().filter(d=> daysUntil(d.date)!==null && daysUntil(d.date) <= 30);
+  const groups = groupGrantsByFunder(active);
   return `
   <div class="page-head"><div><h2>Dashboard</h2><div class="page-sub">${active.length} active grant${active.length===1?'':'s'}</div></div></div>
   <div class="row" style="margin-bottom:20px;">
@@ -481,17 +545,17 @@ function renderDashboard(){
     ${dues.map(d=> renderDueRow(d)).join('')}
   </div>` : ''}
   <h3 style="margin:22px 0 12px;font-size:16px;">Your grants</h3>
-  <div class="grid-cards">${active.length? active.map(g=>renderGrantCard(g)).join('') : '<div class="empty">No grants yet. Add one from the Grants page.</div>'}</div>
+  ${active.length? groups.map(grp=>`<div class="funder-group-head">${esc(grp.funder)}</div><div class="grid-cards">${grp.grants.map(g=>renderGrantCard(g)).join('')}</div>`).join('') : '<div class="empty">No grants yet. Add one from the Grants page.</div>'}
   `;
 }
 function renderDueRow(d){
   const days = daysUntil(d.date);
-  const tagClass = days<=7 ? 'soon':'ok';
+  const tagClass = days<0 ? 'overdue' : (days<=30 ? 'warn' : 'ok');
   return `<div class="due-row"><div><b>${esc(d.grant.funderName)}</b> — ${esc(d.grant.projectName)} · ${d.type}</div>
-    <div class="due-tag ${tagClass}">${fmtDate(d.date)} ${days<0?'(overdue)': `(${days}d)`}</div></div>`;
+    <div><span class="due-tag ${tagClass}">${fmtDate(d.date)} ${days<0?'(overdue)': `(${days}d)`}</span><button class="mark-btn" data-mark-submitted="${d.grant.id}" data-key="${d.key}">Mark submitted</button></div></div>`;
 }
 function renderGrantCard(g){
-  const budgeted = totalBudgeted(g), spent = totalExpended(g.id);
+  const budgeted = totalBudgeted(g)+totalScsBudgeted(g), spent = totalExpended(g.id)+totalScsExpended(g.id);
   const pct = budgeted>0 ? Math.min(100, (spent/budgeted)*100) : 0;
   return `<div class="grant-card" data-open="${g.id}">
     <div class="funder">${esc(g.funderName)}</div>
@@ -499,15 +563,23 @@ function renderGrantCard(g){
     <div class="agr mono">${esc(g.agreementNumber)}</div>
     <div class="bar-track"><div class="bar-fill ${pct>90?'hot':''}" style="width:${pct}%;"></div></div>
     <div class="card-nums"><span>Spent <b>${fmtMoney(spent)}</b></span><span>Budget <b>${fmtMoney(budgeted)}</b></span></div>
-    <span class="status-pill">${esc(g.status||'Active')}</span>
+    <span class="status-pill">${esc(g.status||'Active')}</span>${g.trackingMode==='lumpsum'?'<span class="status-pill" style="background:var(--brass-light);color:#6B4A17;margin-left:6px;">Lump sum</span>':''}
   </div>`;
+}
+function attachDueRowEvents(){
+  document.querySelectorAll('[data-mark-submitted]').forEach(b=> b.onclick = ()=>{
+    if(!confirm('Mark this report as submitted today? This clears the due date until you set a new one.')) return;
+    markReportSubmitted(b.dataset.markSubmitted, b.dataset.key);
+  });
 }
 function attachDashboardEvents(){
   document.querySelectorAll('[data-open]').forEach(el=> el.onclick = ()=>{ state.selectedGrantId = el.dataset.open; state.grantTab='budget'; render(); });
+  attachDueRowEvents();
 }
 
 /* ============ GRANTS LIST ============ */
 function renderGrantsList(){
+  const groups = groupGrantsByFunder(state.grants);
   return `
   <div class="page-head"><div><h2>Grants</h2><div class="page-sub">All grants across funders</div></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -515,7 +587,7 @@ function renderGrantsList(){
       <button class="btn-ghost btn" id="export-grants-pdf">Export (PDF)</button>
       <button class="btn" id="add-grant-btn">+ Add grant</button>
     </div></div>
-  <div class="grid-cards">${state.grants.length? state.grants.map(g=>renderGrantCard(g)).join('') : '<div class="empty">No grants yet.</div>'}</div>
+  ${state.grants.length? groups.map(grp=>`<div class="funder-group-head">${esc(grp.funder)}</div><div class="grid-cards">${grp.grants.map(g=>renderGrantCard(g)).join('')}</div>`).join('') : '<div class="empty">No grants yet.</div>'}
   `;
 }
 function attachGrantsListEvents(){
@@ -535,14 +607,16 @@ function openGrantModal(grantId){
     id: uid(), funderName:'', projectName:'', agreementNumber:'', classNumber:'', grantAmount:0,
     startDate:'', endDate:'', status:'Active', notes:'',
     categories:[{id:uid(),name:'Salary/Labor'},{id:uid(),name:'Travel'},{id:uid(),name:'Supplies/Materials'},{id:uid(),name:'Indirect'}],
-    budgeted:{}, reporting:{performanceFrequency:'',performanceLastSubmitted:'',performanceNextDue:'',financialFrequency:'',financialLastSubmitted:'',financialNextDue:''}
+    budgeted:{}, reporting:{performanceFrequency:'',performanceLastSubmitted:'',performanceNextDue:'',financialFrequency:'',financialLastSubmitted:'',financialNextDue:''},
+    trackingMode:'invoiced', expended:{},
+    scs:{enabled:false, categories:[], budgeted:{}, expended:{}},
+    links:[]
   }};
   render();
   renderModal();
 }
 function renderModal(){
-  const existing = document.querySelector('.modal-bg');
-  if(existing) existing.remove();
+  document.querySelectorAll('.modal-bg').forEach(el=>el.remove());
   if(!state.modal) return;
   const wrap = document.createElement('div');
   wrap.className = 'modal-bg';
@@ -579,11 +653,24 @@ function modalGrantHTML(){
       <div class="field"><label>Start date</label><input id="g-start" type="date" value="${d.startDate||''}"></div>
       <div class="field"><label>End date</label><input id="g-end" type="date" value="${d.endDate||''}"></div>
     </div>
+    <div class="field"><label>How is spending tracked?</label>
+      <select id="g-tracking">
+        <option value="invoiced" ${d.trackingMode!=='lumpsum'?'selected':''}>Invoiced — Expended is calculated from invoices</option>
+        <option value="lumpsum" ${d.trackingMode==='lumpsum'?'selected':''}>Lump sum — I'll enter spending directly, no invoices</option>
+      </select>
+    </div>
     <div class="field"><label>Notes</label><textarea id="g-notes" rows="2">${esc(d.notes)}</textarea></div>
 
-    <h3 style="font-size:14px;margin:18px 0 10px;">Budget categories</h3>
+    <h3 style="font-size:14px;margin:18px 0 10px;">Grantor budget categories</h3>
     <div id="cat-rows">${d.categories.map(c=>catRowHTML(c)).join('')}</div>
     <button class="btn-ghost btn" id="add-cat-btn" type="button">+ Add category</button>
+
+    <h3 style="font-size:14px;margin:18px 0 10px;">SCS share</h3>
+    <div class="toggle-row"><input type="checkbox" id="g-scs-enabled" ${d.scs.enabled?'checked':''}> <label for="g-scs-enabled">This grant has an SCS share (a separate budget tracked alongside the Grantor budget)</label></div>
+    <div id="scs-section" style="${d.scs.enabled?'':'display:none;'}">
+      <div id="scs-cat-rows">${d.scs.categories.map(c=>scsCatRowHTML(c)).join('')}</div>
+      <button class="btn-ghost btn" id="add-scs-cat-btn" type="button">+ Add SCS category</button>
+    </div>
 
     <h3 style="font-size:14px;margin:18px 0 10px;">Reporting</h3>
     <div class="row">
@@ -594,6 +681,10 @@ function modalGrantHTML(){
       <div class="field"><label>Financial reporting frequency</label><input id="g-fin-freq" value="${escAttr(d.reporting.financialFrequency)}" placeholder="e.g. Annually"></div>
       <div class="field"><label>Financial next due</label><input id="g-fin-due" type="date" value="${d.reporting.financialNextDue||''}"></div>
     </div>
+
+    <h3 style="font-size:14px;margin:18px 0 10px;">Links</h3>
+    <div id="link-rows">${d.links.map(l=>linkRowHTML(l)).join('')}</div>
+    <button class="btn-ghost btn" id="add-link-btn" type="button">+ Add link</button>
 
     <div class="modal-actions">
       ${state.modal.grantId && state.currentUser.role==='admin' ? `<button class="btn-danger btn" id="del-grant-btn" style="margin-right:auto;">Delete grant</button>`:''}
@@ -610,18 +701,103 @@ function catRowHTML(c){
     <button class="icon-x" data-remove-cat="${c.id}" type="button">✕</button>
   </div>`;
 }
+function scsCatRowHTML(c){
+  return `<div class="cat-row" data-cat="${c.id}">
+    <input class="cat-name" value="${escAttr(c.name)}" placeholder="Category name">
+    <label style="margin:0;white-space:nowrap;">Budgeted&nbsp;</label>
+    <input class="cat-budget" type="number" step="0.01" style="width:120px;" value="${state.modal.draft.scs.budgeted[c.id]||0}">
+    <button class="icon-x" data-remove-scs-cat="${c.id}" type="button">✕</button>
+  </div>`;
+}
+function linkRowHTML(l){
+  return `<div class="link-row" data-link="${l.id}">
+    <input class="link-label" value="${escAttr(l.label)}" placeholder="Label (e.g. Agreement folder)" style="max-width:220px;">
+    <input class="link-url" value="${escAttr(l.url)}" placeholder="https://drive.google.com/...">
+    <button class="icon-x" data-remove-link="${l.id}" type="button">✕</button>
+  </div>`;
+}
+function syncGrantDraftFromDOM(){
+  const d = state.modal.draft;
+  const g = (id)=> document.getElementById(id);
+  if(g('g-funder')) d.funderName = g('g-funder').value;
+  if(g('g-project')) d.projectName = g('g-project').value;
+  if(g('g-agr')) d.agreementNumber = g('g-agr').value;
+  if(g('g-class')) d.classNumber = g('g-class').value;
+  if(g('g-amount')) d.grantAmount = Number(g('g-amount').value)||0;
+  if(g('g-status')) d.status = g('g-status').value;
+  if(g('g-start')) d.startDate = g('g-start').value;
+  if(g('g-end')) d.endDate = g('g-end').value;
+  if(g('g-tracking')) d.trackingMode = g('g-tracking').value;
+  if(g('g-notes')) d.notes = g('g-notes').value;
+  if(g('g-perf-freq')) d.reporting.performanceFrequency = g('g-perf-freq').value;
+  if(g('g-perf-due')) d.reporting.performanceNextDue = g('g-perf-due').value;
+  if(g('g-fin-freq')) d.reporting.financialFrequency = g('g-fin-freq').value;
+  if(g('g-fin-due')) d.reporting.financialNextDue = g('g-fin-due').value;
+  if(g('g-scs-enabled')) d.scs.enabled = g('g-scs-enabled').checked;
+  document.querySelectorAll('#cat-rows .cat-row').forEach(row=>{
+    const id = row.dataset.cat;
+    const nameVal = row.querySelector('.cat-name').value;
+    const budgetVal = Number(row.querySelector('.cat-budget').value)||0;
+    const cat = d.categories.find(c=>c.id===id);
+    if(cat) cat.name = nameVal;
+    d.budgeted[id] = budgetVal;
+  });
+  document.querySelectorAll('#scs-cat-rows .cat-row').forEach(row=>{
+    const id = row.dataset.cat;
+    const nameVal = row.querySelector('.cat-name').value;
+    const budgetVal = Number(row.querySelector('.cat-budget').value)||0;
+    const cat = d.scs.categories.find(c=>c.id===id);
+    if(cat) cat.name = nameVal;
+    d.scs.budgeted[id] = budgetVal;
+  });
+  document.querySelectorAll('#link-rows .link-row').forEach(row=>{
+    const id = row.dataset.link;
+    const link = d.links.find(l=>l.id===id);
+    if(link){ link.label = row.querySelector('.link-label').value; link.url = row.querySelector('.link-url').value; }
+  });
+}
 function attachGrantModalEvents(){
   document.getElementById('modal-cancel').onclick = closeModal;
+  document.getElementById('g-scs-enabled').onchange = (e)=>{
+    document.getElementById('scs-section').style.display = e.target.checked? '' : 'none';
+  };
   document.getElementById('add-cat-btn').onclick = ()=>{
+    syncGrantDraftFromDOM();
     const newCat = {id:uid(), name:''};
     state.modal.draft.categories.push(newCat);
     state.modal.draft.budgeted[newCat.id]=0;
     renderModal();
   };
   document.querySelectorAll('[data-remove-cat]').forEach(b=> b.onclick = ()=>{
+    syncGrantDraftFromDOM();
     const id = b.dataset.removeCat;
     state.modal.draft.categories = state.modal.draft.categories.filter(c=>c.id!==id);
     delete state.modal.draft.budgeted[id];
+    renderModal();
+  });
+  document.getElementById('add-scs-cat-btn').onclick = ()=>{
+    syncGrantDraftFromDOM();
+    const newCat = {id:uid(), name:''};
+    state.modal.draft.scs.categories.push(newCat);
+    state.modal.draft.scs.budgeted[newCat.id]=0;
+    renderModal();
+  };
+  document.querySelectorAll('[data-remove-scs-cat]').forEach(b=> b.onclick = ()=>{
+    syncGrantDraftFromDOM();
+    const id = b.dataset.removeScsCat;
+    state.modal.draft.scs.categories = state.modal.draft.scs.categories.filter(c=>c.id!==id);
+    delete state.modal.draft.scs.budgeted[id];
+    renderModal();
+  });
+  document.getElementById('add-link-btn').onclick = ()=>{
+    syncGrantDraftFromDOM();
+    state.modal.draft.links.push({id:uid(), label:'', url:''});
+    renderModal();
+  };
+  document.querySelectorAll('[data-remove-link]').forEach(b=> b.onclick = ()=>{
+    syncGrantDraftFromDOM();
+    const id = b.dataset.removeLink;
+    state.modal.draft.links = state.modal.draft.links.filter(l=>l.id!==id);
     renderModal();
   });
   const delBtn = document.getElementById('del-grant-btn');
@@ -634,28 +810,10 @@ function attachGrantModalEvents(){
     render();
   };
   document.getElementById('modal-save').onclick = async ()=>{
+    syncGrantDraftFromDOM();
     const d = state.modal.draft;
-    d.funderName = document.getElementById('g-funder').value.trim();
-    d.projectName = document.getElementById('g-project').value.trim();
-    d.agreementNumber = document.getElementById('g-agr').value.trim();
-    d.classNumber = document.getElementById('g-class').value.trim();
-    d.grantAmount = Number(document.getElementById('g-amount').value)||0;
-    d.status = document.getElementById('g-status').value;
-    d.startDate = document.getElementById('g-start').value;
-    d.endDate = document.getElementById('g-end').value;
-    d.notes = document.getElementById('g-notes').value;
-    d.reporting.performanceFrequency = document.getElementById('g-perf-freq').value;
-    d.reporting.performanceNextDue = document.getElementById('g-perf-due').value;
-    d.reporting.financialFrequency = document.getElementById('g-fin-freq').value;
-    d.reporting.financialNextDue = document.getElementById('g-fin-due').value;
-    document.querySelectorAll('#cat-rows .cat-row').forEach(row=>{
-      const id = row.dataset.cat;
-      const nameVal = row.querySelector('.cat-name').value.trim();
-      const budgetVal = Number(row.querySelector('.cat-budget').value)||0;
-      const cat = d.categories.find(c=>c.id===id);
-      if(cat) cat.name = nameVal;
-      d.budgeted[id] = budgetVal;
-    });
+    d.funderName = d.funderName.trim();
+    d.projectName = d.projectName.trim();
     if(!d.funderName || !d.projectName){ alert('Funder and project name are required.'); return; }
     const ok = await saveGrant(d);
     if(!ok) return;
@@ -665,63 +823,94 @@ function attachGrantModalEvents(){
     render();
   };
 }
-function closeModal(){ state.modal=null; render(); }
+function closeModal(){ state.modal=null; document.querySelectorAll('.modal-bg').forEach(el=>el.remove()); render(); }
 
 /* ============ GRANT DETAIL ============ */
 function renderGrantDetail(){
   const g = getGrant(state.selectedGrantId);
   if(!g) { state.selectedGrantId=null; return renderDashboard(); }
   const expended = expendedByCategory(g.id);
+  const isLumpSum = g.trackingMode==='lumpsum';
+  if(isLumpSum && state.grantTab==='invoices') state.grantTab='budget';
   return `
   <button class="link-btn" id="back-btn">← Back</button>
   <div class="page-head" style="margin-top:10px;">
     <div><div class="page-sub" style="text-transform:uppercase;letter-spacing:.04em;color:var(--brass);font-weight:600;">${esc(g.funderName)}</div>
     <h2>${esc(g.projectName)}</h2>
-    <div class="page-sub mono">${esc(g.agreementNumber)} ${g.classNumber?'· Class '+esc(g.classNumber):''} · ${fmtDate(g.startDate)} – ${fmtDate(g.endDate)}</div></div>
+    <div class="page-sub mono">${esc(g.agreementNumber)} ${g.classNumber?'· Class '+esc(g.classNumber):''} · ${fmtDate(g.startDate)} – ${fmtDate(g.endDate)} ${isLumpSum?'· <span style="color:var(--brass);">Lump sum</span>':''}</div></div>
     <button class="btn-ghost btn" id="edit-grant-btn">Edit grant</button>
   </div>
   <div class="tabs">
     <div class="tab ${state.grantTab==='budget'?'active':''}" data-tab="budget">Budget</div>
-    <div class="tab ${state.grantTab==='invoices'?'active':''}" data-tab="invoices">Invoices</div>
+    ${isLumpSum?'':`<div class="tab ${state.grantTab==='invoices'?'active':''}" data-tab="invoices">Invoices</div>`}
     <div class="tab ${state.grantTab==='reporting'?'active':''}" data-tab="reporting">Reporting</div>
-    <div class="tab ${state.grantTab==='notes'?'active':''}" data-tab="notes">Notes</div>
+    <div class="tab ${state.grantTab==='notes'?'active':''}" data-tab="notes">Notes & Links</div>
   </div>
   ${state.grantTab==='budget'? renderBudgetTab(g, expended) : ''}
-  ${state.grantTab==='invoices'? renderInvoicesTab(g) : ''}
+  ${state.grantTab==='invoices' && !isLumpSum? renderInvoicesTab(g) : ''}
   ${state.grantTab==='reporting'? renderReportingTab(g) : ''}
   ${state.grantTab==='notes'? renderNotesTab(g) : ''}
   `;
 }
 function renderBudgetTab(g, expended){
+  const isLumpSum = g.trackingMode==='lumpsum';
   const totB = totalBudgeted(g), totE = Object.values(expended).reduce((s,v)=>s+v,0);
+  const grantorRows = g.categories.map(c=>{
+    const bud = Number(g.budgeted[c.id]||0), exp = expended[c.id]||0, rem = bud-exp;
+    const expCell = isLumpSum
+      ? `<input class="lump-exp" data-scope="grantor" data-cat="${c.id}" type="number" step="0.01" style="width:110px;text-align:right;" value="${exp}">`
+      : fmtMoney(exp);
+    return `<tr><td>${esc(c.name)}</td><td class="num">${fmtMoney(bud)}</td><td class="num">${expCell}</td><td class="num ${rem<0?'neg':''}">${fmtMoney(rem)}</td></tr>`;
+  }).join('');
+  let scsBlock = '';
+  if(g.scs && g.scs.enabled){
+    const scsExpended = expendedByScsCategory(g.id);
+    const scsTotB = totalScsBudgeted(g), scsTotE = Object.values(scsExpended).reduce((s,v)=>s+v,0);
+    const scsRows = g.scs.categories.map(c=>{
+      const bud = Number(g.scs.budgeted[c.id]||0), exp = scsExpended[c.id]||0, rem = bud-exp;
+      const expCell = isLumpSum
+        ? `<input class="lump-exp" data-scope="scs" data-cat="${c.id}" type="number" step="0.01" style="width:110px;text-align:right;" value="${exp}">`
+        : fmtMoney(exp);
+      return `<tr><td>${esc(c.name)}</td><td class="num">${fmtMoney(bud)}</td><td class="num">${expCell}</td><td class="num ${rem<0?'neg':''}">${fmtMoney(rem)}</td></tr>`;
+    }).join('');
+    scsBlock = `<h3 style="font-size:15px;margin:20px 0 10px;">SCS Budget</h3>
+      <div class="card">
+        <table><thead><tr><th>Category</th><th class="num">Budgeted</th><th class="num">Expended</th><th class="num">Remaining</th></tr></thead>
+        <tbody>${scsRows || '<tr><td colspan="4" style="color:var(--moss);">No SCS categories set — edit the grant to add them.</td></tr>'}
+        <tr class="total-row"><td>Total</td><td class="num">${fmtMoney(scsTotB)}</td><td class="num">${fmtMoney(scsTotE)}</td><td class="num ${scsTotB-scsTotE<0?'neg':''}">${fmtMoney(scsTotB-scsTotE)}</td></tr>
+        </tbody></table>
+      </div>`;
+  }
   return `<div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px;">
+    ${isLumpSum?'<button class="btn btn-sm" id="save-lump-exp-btn">Save spending</button>':''}
     <button class="btn-ghost btn btn-sm" id="export-budget-excel">Export (Excel)</button>
     <button class="btn-ghost btn btn-sm" id="export-budget-pdf">Export (PDF)</button>
   </div>
+  <h3 style="font-size:15px;margin-bottom:10px;">Grantor Budget</h3>
   <div class="card">
     <table><thead><tr><th>Category</th><th class="num">Budgeted</th><th class="num">Expended</th><th class="num">Remaining</th></tr></thead>
     <tbody>
-    ${g.categories.map(c=>{
-      const bud = Number(g.budgeted[c.id]||0), exp = expended[c.id]||0, rem = bud-exp;
-      return `<tr><td>${esc(c.name)}</td><td class="num">${fmtMoney(bud)}</td><td class="num">${fmtMoney(exp)}</td><td class="num ${rem<0?'neg':''}">${fmtMoney(rem)}</td></tr>`;
-    }).join('')}
+    ${grantorRows}
     <tr class="total-row"><td>Total</td><td class="num">${fmtMoney(totB)}</td><td class="num">${fmtMoney(totE)}</td><td class="num ${totB-totE<0?'neg':''}">${fmtMoney(totB-totE)}</td></tr>
     </tbody></table>
-  </div>`;
+  </div>
+  ${scsBlock}`;
 }
 function renderInvoicesTab(g){
   const invs = grantInvoices(g.id);
+  const showScsCol = g.scs && g.scs.enabled;
   return `<div class="page-head" style="margin-bottom:12px;"><div class="page-sub">Reimbursement requests submitted against this grant</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
       <button class="btn-ghost btn" id="export-invoices-excel">Export (Excel)</button>
       <button class="btn" id="add-invoice-btn">+ Add invoice</button>
     </div></div>
   <div class="card">
-    ${invs.length? `<table><thead><tr><th>Inv. #</th><th>Period</th><th class="num">Total</th><th>Sent</th><th>Received</th><th></th></tr></thead>
+    ${invs.length? `<table><thead><tr><th>Inv. #</th><th>Period</th><th class="num">Grantor Total</th>${showScsCol?'<th class="num">SCS Total</th>':''}<th>Sent</th><th>Received</th><th></th></tr></thead>
     <tbody>${invs.map(inv=>`<tr>
       <td class="mono">${esc(inv.invoiceNumber)}</td>
       <td>${fmtDate(inv.periodFrom)} – ${fmtDate(inv.periodTo)}</td>
       <td class="num">${fmtMoney(inv.total)}</td>
+      ${showScsCol?`<td class="num">${fmtMoney(inv.scsTotal||0)}</td>`:''}
       <td>${fmtDate(inv.sentDate)}</td>
       <td>${inv.receivedDate? fmtDate(inv.receivedDate) : '<span style="color:var(--brass);">pending</span>'}</td>
       <td><button class="link-btn" data-print="${inv.id}">Print</button> · <button class="link-btn" data-edit-inv="${inv.id}">Edit</button></td>
@@ -732,15 +921,22 @@ function renderReportingTab(g){
   return `<div class="card">
     <div class="row">
       <div style="flex:1;"><label>Performance reporting</label>
-        <p>Frequency: <b>${esc(g.reporting.performanceFrequency)||'—'}</b><br>Next due: <b>${fmtDate(g.reporting.performanceNextDue)}</b></p></div>
+        <p>Frequency: <b>${esc(g.reporting.performanceFrequency)||'—'}</b><br>Next due: <b>${fmtDate(g.reporting.performanceNextDue)}</b>${g.reporting.performanceLastSubmitted?`<br><span style="color:var(--moss);font-size:12px;">Last submitted ${fmtDate(g.reporting.performanceLastSubmitted)}</span>`:''}</p></div>
       <div style="flex:1;"><label>Financial reporting</label>
-        <p>Frequency: <b>${esc(g.reporting.financialFrequency)||'—'}</b><br>Next due: <b>${fmtDate(g.reporting.financialNextDue)}</b></p></div>
+        <p>Frequency: <b>${esc(g.reporting.financialFrequency)||'—'}</b><br>Next due: <b>${fmtDate(g.reporting.financialNextDue)}</b>${g.reporting.financialLastSubmitted?`<br><span style="color:var(--moss);font-size:12px;">Last submitted ${fmtDate(g.reporting.financialLastSubmitted)}</span>`:''}</p></div>
     </div>
     <button class="btn-ghost btn" id="edit-reporting-btn">Edit reporting dates</button>
   </div>`;
 }
 function renderNotesTab(g){
-  return `<div class="card"><p style="white-space:pre-wrap;">${esc(g.notes) || 'No notes yet.'}</p></div>`;
+  const links = g.links || [];
+  return `<div class="card">
+    <p style="white-space:pre-wrap;">${esc(g.notes) || 'No notes yet.'}</p>
+  </div>
+  <h3 style="font-size:15px;margin:18px 0 10px;">Links</h3>
+  <div class="card">
+    ${links.length? links.map(l=>`<div class="due-row"><div>${esc(l.label||l.url)}</div><a href="${escAttr(l.url)}" target="_blank" rel="noopener">Open ↗</a></div>`).join('') : '<div style="color:var(--moss);font-size:13px;">No links yet — add some by editing this grant.</div>'}
+  </div>`;
 }
 function attachGrantDetailEvents(){
   document.getElementById('back-btn').onclick = ()=>{ state.selectedGrantId=null; render(); };
@@ -758,6 +954,24 @@ function attachGrantDetailEvents(){
   if(exBudgetPdf) exBudgetPdf.onclick = ()=> printBudgetReport(state.selectedGrantId);
   const exInvExcel = document.getElementById('export-invoices-excel');
   if(exInvExcel) exInvExcel.onclick = ()=> exportInvoicesExcel(state.selectedGrantId);
+  const saveLumpBtn = document.getElementById('save-lump-exp-btn');
+  if(saveLumpBtn) saveLumpBtn.onclick = async ()=>{
+    const g = getGrant(state.selectedGrantId);
+    if(!g) return;
+    g.expended = g.expended || {};
+    g.scs = g.scs || {enabled:false, categories:[], budgeted:{}, expended:{}};
+    g.scs.expended = g.scs.expended || {};
+    document.querySelectorAll('.lump-exp').forEach(inp=>{
+      const val = Number(inp.value)||0;
+      if(inp.dataset.scope==='grantor') g.expended[inp.dataset.cat] = val;
+      else g.scs.expended[inp.dataset.cat] = val;
+    });
+    const ok = await saveGrant(g);
+    if(!ok) return;
+    const idx = state.grants.findIndex(x=>x.id===g.id);
+    if(idx>=0) state.grants[idx]=g;
+    render();
+  };
 }
 
 /* ============ INVOICE MODAL ============ */
@@ -766,15 +980,21 @@ function openInvoiceModal(grantId, invoiceId){
   const existing = invoiceId ? state.invoices.find(i=>i.id===invoiceId) : null;
   const draft = existing ? JSON.parse(JSON.stringify(existing)) : {
     id: uid(), grantId, invoiceNumber: (grantInvoices(grantId).length+1),
-    periodFrom:'', periodTo:'', amounts:{}, indirect:0, total:0, sentDate:'', receivedDate:'', notes:''
+    periodFrom:'', periodTo:'', amounts:{}, indirect:0, total:0, sentDate:'', receivedDate:'', notes:'',
+    scsAmounts:{}, scsTotal:0
   };
   g.categories.forEach(c=>{ if(!(c.id in draft.amounts)) draft.amounts[c.id]=0; });
+  if(g.scs && g.scs.enabled){
+    draft.scsAmounts = draft.scsAmounts || {};
+    g.scs.categories.forEach(c=>{ if(!(c.id in draft.scsAmounts)) draft.scsAmounts[c.id]=0; });
+  }
   state.modal = {type:'invoice', grantId, invoiceId, draft};
   render(); renderModal();
 }
 function modalInvoiceHTML(){
   const g = getGrant(state.modal.grantId);
   const d = state.modal.draft;
+  const hasScs = g.scs && g.scs.enabled;
   return `<div class="modal wide">
     <h3>${state.modal.invoiceId? 'Edit invoice':'Add invoice'} — ${esc(g.projectName)}</h3>
     <div class="row">
@@ -782,9 +1002,14 @@ function modalInvoiceHTML(){
       <div class="field"><label>Period from</label><input id="i-from" type="date" value="${d.periodFrom}"></div>
       <div class="field"><label>Period to</label><input id="i-to" type="date" value="${d.periodTo}"></div>
     </div>
-    <table style="margin:10px 0;"><thead><tr><th>Category</th><th class="num">Amount</th></tr></thead>
+    <h3 style="font-size:13px;margin:14px 0 6px;">Grantor amounts</h3>
+    <table style="margin:0 0 10px;"><thead><tr><th>Category</th><th class="num">Amount</th></tr></thead>
     <tbody>${g.categories.map(c=>`<tr><td>${esc(c.name)}</td><td class="num"><input class="i-amt" data-cat="${c.id}" type="number" step="0.01" style="width:120px;text-align:right;" value="${d.amounts[c.id]||0}"></td></tr>`).join('')}
     </tbody></table>
+    ${hasScs?`<h3 style="font-size:13px;margin:14px 0 6px;">SCS amounts</h3>
+    <table style="margin:0 0 10px;"><thead><tr><th>Category</th><th class="num">Amount</th></tr></thead>
+    <tbody>${g.scs.categories.map(c=>`<tr><td>${esc(c.name)}</td><td class="num"><input class="i-scs-amt" data-cat="${c.id}" type="number" step="0.01" style="width:120px;text-align:right;" value="${(d.scsAmounts||{})[c.id]||0}"></td></tr>`).join('')}
+    </tbody></table>`:''}
     <div class="row">
       <div class="field"><label>Sent date</label><input id="i-sent" type="date" value="${d.sentDate}"></div>
       <div class="field"><label>Payment received date</label><input id="i-recv" type="date" value="${d.receivedDate}"></div>
@@ -821,6 +1046,14 @@ function attachInvoiceModalEvents(){
       total += val;
     });
     d.total = total;
+    d.scsAmounts = d.scsAmounts || {};
+    let scsTotal = 0;
+    document.querySelectorAll('.i-scs-amt').forEach(inp=>{
+      const val = Number(inp.value)||0;
+      d.scsAmounts[inp.dataset.cat] = val;
+      scsTotal += val;
+    });
+    d.scsTotal = scsTotal;
     const ok = await saveInvoiceRow(d);
     if(!ok) return;
     const idx = state.invoices.findIndex(i=>i.id===d.id);
@@ -840,6 +1073,8 @@ function printInvoice(invoiceId){
   const g = getGrant(inv.grantId);
   const org = state.orgSettings;
   const rows = g.categories.map(c=> `<tr><td>${esc(c.name)}</td><td style="text-align:right;">${fmtMoney(inv.amounts[c.id]||0)}</td></tr>`).join('');
+  const hasScs = g.scs && g.scs.enabled;
+  const scsRows = hasScs ? g.scs.categories.map(c=> `<tr><td>${esc(c.name)}</td><td style="text-align:right;">${fmtMoney((inv.scsAmounts||{})[c.id]||0)}</td></tr>`).join('') : '';
   showPrintSheet(`
     <div class="inv-header">
       <h2>Request for Reimbursement</h2>
@@ -852,9 +1087,13 @@ function printInvoice(invoiceId){
       <tr><td><b>Invoice #</b></td><td>${esc(inv.invoiceNumber)}</td><td><b>Period covered</b></td><td>${fmtDate(inv.periodFrom)} – ${fmtDate(inv.periodTo)}</td></tr>
     </table>
     <table class="inv-table" style="width:100%;">
-      <thead><tr><th>Category</th><th style="text-align:right;">Amount</th></tr></thead>
+      <thead><tr><th colspan="2">Grantor amounts</th></tr></thead>
       <tbody>${rows}<tr><td><b>Total requested</b></td><td style="text-align:right;"><b>${fmtMoney(inv.total)}</b></td></tr></tbody>
     </table>
+    ${hasScs? `<table class="inv-table" style="width:100%;">
+      <thead><tr><th colspan="2">SCS amounts</th></tr></thead>
+      <tbody>${scsRows}<tr><td><b>SCS total</b></td><td style="text-align:right;"><b>${fmtMoney(inv.scsTotal||0)}</b></td></tr></tbody>
+    </table>` : ''}
     <div class="sig-line">Signature of Authorized Certifying Official / Date</div>
     <div class="sig-line" style="margin-top:30px;">Printed Name and Title</div>
   `);
@@ -866,13 +1105,30 @@ function printBudgetReport(gid){
     return `<tr><td>${esc(c.name)}</td><td style="text-align:right;">${fmtMoney(bud)}</td><td style="text-align:right;">${fmtMoney(exp)}</td><td style="text-align:right;">${fmtMoney(bud-exp)}</td></tr>`;
   }).join('');
   const totB = totalBudgeted(g), totE = totalExpended(gid);
+  const hasScs = g.scs && g.scs.enabled;
+  let scsSection = '';
+  if(hasScs){
+    const scsExpended = expendedByScsCategory(gid);
+    const scsRows = g.scs.categories.map(c=>{
+      const bud = Number(g.scs.budgeted[c.id]||0), exp = scsExpended[c.id]||0;
+      return `<tr><td>${esc(c.name)}</td><td style="text-align:right;">${fmtMoney(bud)}</td><td style="text-align:right;">${fmtMoney(exp)}</td><td style="text-align:right;">${fmtMoney(bud-exp)}</td></tr>`;
+    }).join('');
+    const scsTotB = totalScsBudgeted(g), scsTotE = totalScsExpended(gid);
+    scsSection = `<h3 style="margin-top:16px;font-size:13px;">SCS Budget</h3>
+    <table class="inv-table" style="width:100%;">
+      <thead><tr><th>Category</th><th style="text-align:right;">Budgeted</th><th style="text-align:right;">Expended</th><th style="text-align:right;">Remaining</th></tr></thead>
+      <tbody>${scsRows}<tr><td><b>Total</b></td><td style="text-align:right;"><b>${fmtMoney(scsTotB)}</b></td><td style="text-align:right;"><b>${fmtMoney(scsTotE)}</b></td><td style="text-align:right;"><b>${fmtMoney(scsTotB-scsTotE)}</b></td></tr></tbody>
+    </table>`;
+  }
   showPrintSheet(`
     <div class="inv-header"><h2>Budget Report</h2><div>${esc(state.orgSettings.orgName)}</div>
       <div>${esc(g.funderName)} — ${esc(g.projectName)}</div><div>${esc(g.agreementNumber)}</div></div>
+    <h3 style="font-size:13px;">Grantor Budget</h3>
     <table class="inv-table" style="width:100%;">
       <thead><tr><th>Category</th><th style="text-align:right;">Budgeted</th><th style="text-align:right;">Expended</th><th style="text-align:right;">Remaining</th></tr></thead>
       <tbody>${rows}<tr><td><b>Total</b></td><td style="text-align:right;"><b>${fmtMoney(totB)}</b></td><td style="text-align:right;"><b>${fmtMoney(totE)}</b></td><td style="text-align:right;"><b>${fmtMoney(totB-totE)}</b></td></tr></tbody>
     </table>
+    ${scsSection}
   `);
 }
 function printGrantsOverview(){
@@ -920,19 +1176,27 @@ function downloadExcel(filename, sheets){
   }catch(e){ console.error(e); alert('Could not generate the Excel file. Try again in a moment.'); }
 }
 function exportGrantsExcel(){
-  const summaryRows = [['Funder','Project','Agreement #','Class #','Status','Total Budget','Total Expended','Total Remaining','Start Date','End Date']];
+  const summaryRows = [['Funder','Project','Agreement #','Class #','Status','Tracking','Total Budget (incl. SCS)','Total Expended (incl. SCS)','Total Remaining','Start Date','End Date']];
   state.grants.forEach(g=>{
-    const b = totalBudgeted(g), e = totalExpended(g.id);
-    summaryRows.push([g.funderName, g.projectName, g.agreementNumber, g.classNumber, g.status, b, e, b-e, g.startDate, g.endDate]);
+    const b = totalBudgeted(g)+totalScsBudgeted(g), e = totalExpended(g.id)+totalScsExpended(g.id);
+    summaryRows.push([g.funderName, g.projectName, g.agreementNumber, g.classNumber, g.status, g.trackingMode||'invoiced', b, e, b-e, g.startDate, g.endDate]);
   });
   const sheets = [{name:'Grants Overview', rows: summaryRows}];
   state.grants.forEach(g=>{
     const expended = expendedByCategory(g.id);
-    const rows = [[g.funderName+' — '+g.projectName],['Agreement #', g.agreementNumber],[],['Category','Budgeted','Expended','Remaining']];
+    const rows = [[g.funderName+' — '+g.projectName],['Agreement #', g.agreementNumber],[],['Grantor Budget'],['Category','Budgeted','Expended','Remaining']];
     g.categories.forEach(c=>{
       const bud = Number(g.budgeted[c.id]||0), exp = expended[c.id]||0;
       rows.push([c.name, bud, exp, bud-exp]);
     });
+    if(g.scs && g.scs.enabled){
+      const scsExpended = expendedByScsCategory(g.id);
+      rows.push([],['SCS Budget'],['Category','Budgeted','Expended','Remaining']);
+      g.scs.categories.forEach(c=>{
+        const bud = Number(g.scs.budgeted[c.id]||0), exp = scsExpended[c.id]||0;
+        rows.push([c.name, bud, exp, bud-exp]);
+      });
+    }
     sheets.push({name: (g.agreementNumber || g.projectName || 'Grant'), rows});
   });
   downloadExcel('grants-overview.xlsx', sheets);
@@ -940,22 +1204,41 @@ function exportGrantsExcel(){
 function exportBudgetExcel(gid){
   const g = getGrant(gid); if(!g) return;
   const expended = expendedByCategory(gid);
-  const rows = [[g.funderName+' — '+g.projectName],['Agreement #', g.agreementNumber],[],['Category','Budgeted','Expended','Remaining']];
+  const rows = [[g.funderName+' — '+g.projectName],['Agreement #', g.agreementNumber],[],['Grantor Budget'],['Category','Budgeted','Expended','Remaining']];
   g.categories.forEach(c=>{
     const bud = Number(g.budgeted[c.id]||0), exp = expended[c.id]||0;
     rows.push([c.name, bud, exp, bud-exp]);
   });
   const totB = totalBudgeted(g), totE = totalExpended(gid);
   rows.push(['Total', totB, totE, totB-totE]);
+  if(g.scs && g.scs.enabled){
+    const scsExpended = expendedByScsCategory(gid);
+    rows.push([],['SCS Budget'],['Category','Budgeted','Expended','Remaining']);
+    g.scs.categories.forEach(c=>{
+      const bud = Number(g.scs.budgeted[c.id]||0), exp = scsExpended[c.id]||0;
+      rows.push([c.name, bud, exp, bud-exp]);
+    });
+    const scsTotB = totalScsBudgeted(g), scsTotE = totalScsExpended(gid);
+    rows.push(['Total', scsTotB, scsTotE, scsTotB-scsTotE]);
+  }
   downloadExcel(`budget-${(g.agreementNumber||g.id).replace(/[^a-z0-9-]/gi,'')}.xlsx`, [{name:'Budget', rows}]);
 }
 function exportInvoicesExcel(gid){
   const g = getGrant(gid); if(!g) return;
   const invs = grantInvoices(gid);
-  const header = ['Invoice #','Period From','Period To', ...g.categories.map(c=>c.name), 'Total','Sent Date','Received Date'];
+  const hasScs = g.scs && g.scs.enabled;
+  const header = ['Invoice #','Period From','Period To', ...g.categories.map(c=>c.name), 'Grantor Total',
+    ...(hasScs? g.scs.categories.map(c=>'SCS: '+c.name) : []), ...(hasScs? ['SCS Total'] : []),
+    'Sent Date','Received Date'];
   const rows = [header];
   invs.forEach(inv=>{
-    rows.push([inv.invoiceNumber, inv.periodFrom, inv.periodTo, ...g.categories.map(c=> Number(inv.amounts[c.id]||0)), inv.total, inv.sentDate, inv.receivedDate]);
+    rows.push([
+      inv.invoiceNumber, inv.periodFrom, inv.periodTo,
+      ...g.categories.map(c=> Number(inv.amounts[c.id]||0)), inv.total,
+      ...(hasScs? g.scs.categories.map(c=> Number((inv.scsAmounts||{})[c.id]||0)) : []),
+      ...(hasScs? [inv.scsTotal||0] : []),
+      inv.sentDate, inv.receivedDate
+    ]);
   });
   downloadExcel(`invoices-${(g.agreementNumber||g.id).replace(/[^a-z0-9-]/gi,'')}.xlsx`, [{name:'Invoices', rows}]);
 }
@@ -976,7 +1259,7 @@ function renderReporting(){
   return `<div class="page-head"><div><h2>Reporting calendar</h2><div class="page-sub">All performance & financial reporting due dates, soonest first</div></div></div>
   <div class="card">${dues.length? dues.map(d=>renderDueRow(d)).join('') : '<div class="empty">No reporting dates set yet.</div>'}</div>`;
 }
-function attachReportingEvents(){}
+function attachReportingEvents(){ attachDueRowEvents(); }
 
 /* ============ REIMBURSEMENTS (quarterly rollup) ============ */
 function renderReimbursements(){
