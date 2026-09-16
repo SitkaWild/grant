@@ -106,8 +106,9 @@
   .modal.wide{max-width:760px;}
   .modal h3{margin-bottom:16px;}
   .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px;}
-  .cat-row{display:flex;gap:8px;align-items:center;margin-bottom:8px;}
-  .cat-row input{flex:1;}
+  .cat-row{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;}
+  .cat-row input.cat-name{flex:1;min-width:120px;}
+  .cat-row input[type=checkbox]{flex:0 0 auto;width:auto;}
   .icon-x{background:none;border:none;color:var(--rust);font-size:16px;padding:2px 8px;}
   .empty{color:var(--moss);font-size:13px;padding:24px;text-align:center;background:var(--sage);border-radius:6px;}
   .due-row{display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid var(--line);}
@@ -166,7 +167,8 @@ function rowToGrant(r){
     categories: r.categories || [], budgeted: r.budgeted || {}, reporting: r.reporting || {},
     trackingMode: r.tracking_mode || 'invoiced',
     expended: r.expended || {},
-    scs: Object.assign({enabled:false, categories:[], budgeted:{}, expended:{}}, r.scs || {}),
+    indirectRate: r.indirect_rate,
+    scs: Object.assign({enabled:false, categories:[], budgeted:{}, expended:{}, indirectRate:null}, r.scs || {}),
     links: r.links || []
   };
 }
@@ -178,7 +180,8 @@ function grantToRow(g){
     status: g.status, notes: g.notes, categories: g.categories, budgeted: g.budgeted, reporting: g.reporting,
     tracking_mode: g.trackingMode || 'invoiced',
     expended: g.expended || {},
-    scs: g.scs || {enabled:false, categories:[], budgeted:{}, expended:{}},
+    indirect_rate: (g.indirectRate===''||g.indirectRate===undefined) ? null : g.indirectRate,
+    scs: g.scs || {enabled:false, categories:[], budgeted:{}, expended:{}, indirectRate:null},
     links: g.links || []
   };
 }
@@ -279,6 +282,7 @@ let state = {
   loginName: '',
   loginError: '',
   view: 'dashboard',
+  reportingTab: 'due',
   selectedGrantId: null,
   grantTab: 'budget',
   modal: null, // {type:'grant'|'invoice'|'staff'|'category', ...}
@@ -334,10 +338,44 @@ function expendedByScsCategory(gid){
   });
   return out;
 }
-function totalBudgeted(g){ return g.categories.reduce((s,c)=> s + Number(g.budgeted[c.id]||0), 0); }
-function totalExpended(gid){ const e = expendedByCategory(gid); return Object.values(e).reduce((s,v)=>s+v,0); }
-function totalScsBudgeted(g){ return (g.scs && g.scs.enabled) ? g.scs.categories.reduce((s,c)=> s + Number(g.scs.budgeted[c.id]||0), 0) : 0; }
-function totalScsExpended(gid){ const e = expendedByScsCategory(gid); return Object.values(e).reduce((s,v)=>s+v,0); }
+function totalBudgeted(g){ return g.categories.filter(c=>!c.isInKind).reduce((s,c)=> s + Number(g.budgeted[c.id]||0), 0); }
+function totalExpended(gid){
+  const g = getGrant(gid); if(!g) return 0;
+  const e = expendedByCategory(gid);
+  return g.categories.filter(c=>!c.isInKind).reduce((s,c)=> s + (e[c.id]||0), 0);
+}
+function directBudgeted(g){ return g.categories.filter(c=>!c.isIndirect && !c.isInKind).reduce((s,c)=> s + Number(g.budgeted[c.id]||0), 0); }
+function indirectBudgeted(g){ return g.categories.filter(c=>c.isIndirect && !c.isInKind).reduce((s,c)=> s + Number(g.budgeted[c.id]||0), 0); }
+function directExpended(gid){
+  const g = getGrant(gid); if(!g) return 0;
+  const e = expendedByCategory(gid);
+  return g.categories.filter(c=>!c.isIndirect && !c.isInKind).reduce((s,c)=> s + (e[c.id]||0), 0);
+}
+function indirectExpended(gid){
+  const g = getGrant(gid); if(!g) return 0;
+  const e = expendedByCategory(gid);
+  return g.categories.filter(c=>c.isIndirect && !c.isInKind).reduce((s,c)=> s + (e[c.id]||0), 0);
+}
+function inKindCategories(g){ return g.categories.filter(c=>c.isInKind); }
+function totalScsBudgeted(g){ return (g.scs && g.scs.enabled) ? g.scs.categories.filter(c=>!c.isInKind).reduce((s,c)=> s + Number(g.scs.budgeted[c.id]||0), 0) : 0; }
+function totalScsExpended(gid){
+  const g = getGrant(gid); if(!g || !g.scs || !g.scs.enabled) return 0;
+  const e = expendedByScsCategory(gid);
+  return g.scs.categories.filter(c=>!c.isInKind).reduce((s,c)=> s + (e[c.id]||0), 0);
+}
+function directScsBudgeted(g){ return (g.scs && g.scs.enabled) ? g.scs.categories.filter(c=>!c.isIndirect && !c.isInKind).reduce((s,c)=> s + Number(g.scs.budgeted[c.id]||0), 0) : 0; }
+function indirectScsBudgeted(g){ return (g.scs && g.scs.enabled) ? g.scs.categories.filter(c=>c.isIndirect && !c.isInKind).reduce((s,c)=> s + Number(g.scs.budgeted[c.id]||0), 0) : 0; }
+function directScsExpended(gid){
+  const g = getGrant(gid); if(!g || !g.scs || !g.scs.enabled) return 0;
+  const e = expendedByScsCategory(gid);
+  return g.scs.categories.filter(c=>!c.isIndirect && !c.isInKind).reduce((s,c)=> s + (e[c.id]||0), 0);
+}
+function indirectScsExpended(gid){
+  const g = getGrant(gid); if(!g || !g.scs || !g.scs.enabled) return 0;
+  const e = expendedByScsCategory(gid);
+  return g.scs.categories.filter(c=>c.isIndirect && !c.isInKind).reduce((s,c)=> s + (e[c.id]||0), 0);
+}
+function inKindScsCategories(g){ return (g.scs && g.scs.enabled) ? g.scs.categories.filter(c=>c.isInKind) : []; }
 function fmtMoney(n){ n = Number(n)||0; return '$' + n.toLocaleString('en-US',{minimumFractionDigits:2, maximumFractionDigits:2}); }
 function fmtDate(d){ if(!d) return '—'; const dt = new Date(d+'T00:00:00'); if(isNaN(dt)) return d; return dt.toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'}); }
 function daysUntil(d){ if(!d) return null; const today = new Date(); today.setHours(0,0,0,0); const dt = new Date(d+'T00:00:00'); return Math.round((dt-today)/86400000); }
@@ -413,6 +451,7 @@ async function attemptLoginAsync(name){
 /* ============ RENDER ROOT ============ */
 function render(){
   const root = document.getElementById('root');
+  if(window._loginKeyHandler){ document.removeEventListener('keydown', window._loginKeyHandler); window._loginKeyHandler=null; }
   if(!state.modal){ document.querySelectorAll('.modal-bg').forEach(el=>el.remove()); }
   if(CONFIG_MISSING){ root.innerHTML = renderConfigMissing(); return; }
   if(state.loading){ root.innerHTML = '<div style="padding:60px;text-align:center;color:#5C7A63;">Loading ledger…</div>'; return; }
@@ -496,6 +535,13 @@ function attachLoginEvents(){
     if(!state.loginName){ state.loginError='Select your name.'; render(); return; }
     attemptLoginAsync(state.loginName);
   };
+  window._loginKeyHandler = (e)=>{
+    if(document.activeElement && document.activeElement.id==='login-name') return;
+    if(e.key>='0' && e.key<='9'){ e.preventDefault(); handlePinDigit(e.key); }
+    else if(e.key==='Backspace' || e.key==='Delete'){ e.preventDefault(); handlePinBackspace(); }
+    else if(e.key==='Enter'){ e.preventDefault(); document.getElementById('login-submit').click(); }
+  };
+  document.addEventListener('keydown', window._loginKeyHandler);
 }
 function escAttr(s){ return (s||'').replace(/"/g,'&quot;'); }
 function esc(s){ return (s||'').replace(/[&<>]/g, c=> ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
@@ -586,6 +632,7 @@ function renderGrantCard(g){
   return `<div class="grant-card" data-open="${g.id}">
     <div class="funder">${esc(g.funderName)}</div>
     <h3>${esc(g.projectName)}</h3>
+    ${g.classNumber?`<div style="font-size:11.5px;color:var(--moss);margin-bottom:6px;">Class ${esc(g.classNumber)}</div>`:''}
     <div class="agr mono">${esc(g.agreementNumber)}</div>
     <div class="bar-track"><div class="bar-fill ${pct>90?'hot':''}" style="width:${pct}%;"></div></div>
     <div class="card-nums"><span>Spent <b>${fmtMoney(spent)}</b></span><span>Budget <b>${fmtMoney(budgeted)}</b></span></div>
@@ -632,16 +679,18 @@ function openGrantModal(grantId){
   state.modal = {type:'grant', grantId: grantId, draft: g ? JSON.parse(JSON.stringify(g)) : {
     id: uid(), funderName:'', projectName:'', agreementNumber:'', classNumber:'', grantAmount:0,
     startDate:'', endDate:'', status:'Active', notes:'',
-    categories:[{id:uid(),name:'Salary/Labor'},{id:uid(),name:'Travel'},{id:uid(),name:'Supplies/Materials'},{id:uid(),name:'Indirect'}],
+    categories:[{id:uid(),name:'Salary/Labor'},{id:uid(),name:'Travel'},{id:uid(),name:'Supplies/Materials'},{id:uid(),name:'Indirect',isIndirect:true}],
     budgeted:{}, reporting:{performanceFrequency:'',performanceLastSubmitted:'',performanceNextDue:'',financialFrequency:'',financialLastSubmitted:'',financialNextDue:''},
-    trackingMode:'invoiced', expended:{},
-    scs:{enabled:false, categories:[], budgeted:{}, expended:{}},
+    trackingMode:'invoiced', expended:{}, indirectRate:'',
+    scs:{enabled:false, categories:[], budgeted:{}, expended:{}, indirectRate:''},
     links:[]
   }};
   render();
   renderModal();
 }
 function renderModal(){
+  const prevModalEl = document.querySelector('.modal-bg .modal');
+  const prevScroll = prevModalEl ? prevModalEl.scrollTop : 0;
   document.querySelectorAll('.modal-bg').forEach(el=>el.remove());
   if(!state.modal) return;
   const wrap = document.createElement('div');
@@ -656,6 +705,8 @@ function renderModal(){
   if(state.modal.type==='invoice') attachInvoiceModalEvents();
   if(state.modal.type==='staff') attachStaffModalEvents();
   if(state.modal.type==='standalone') attachStandaloneModalEvents();
+  const newModalEl = wrap.querySelector('.modal');
+  if(newModalEl && prevScroll) newModalEl.scrollTop = prevScroll;
 }
 function modalGrantHTML(){
   const d = state.modal.draft;
@@ -687,15 +738,18 @@ function modalGrantHTML(){
         <option value="lumpsum" ${d.trackingMode==='lumpsum'?'selected':''}>Lump sum — I'll enter spending directly, no invoices</option>
       </select>
     </div>
+    <div class="field" style="max-width:220px;"><label>Indirect rate (%)</label><input id="g-indirect-rate" type="number" step="0.01" value="${d.indirectRate!==null && d.indirectRate!==undefined ? d.indirectRate : ''}" placeholder="e.g. 10 or 15"></div>
     <div class="field"><label>Notes</label><textarea id="g-notes" rows="2">${esc(d.notes)}</textarea></div>
 
     <h3 style="font-size:14px;margin:18px 0 10px;">Grantor budget categories</h3>
+    <p style="font-size:12px;color:var(--moss);margin:-4px 0 8px;">Check "Indirect" on the one category that should auto-calculate from direct costs at the rate above. Check "In-Kind" for categories that shouldn't count toward totals.</p>
     <div id="cat-rows">${d.categories.map(c=>catRowHTML(c)).join('')}</div>
     <button class="btn-ghost btn" id="add-cat-btn" type="button">+ Add category</button>
 
     <h3 style="font-size:14px;margin:18px 0 10px;">SCS share</h3>
     <div class="toggle-row"><input type="checkbox" id="g-scs-enabled" ${d.scs.enabled?'checked':''}> <label for="g-scs-enabled">This grant has an SCS share (a separate budget tracked alongside the Grantor budget)</label></div>
     <div id="scs-section" style="${d.scs.enabled?'':'display:none;'}">
+      <div class="field" style="max-width:220px;"><label>SCS indirect rate (%)</label><input id="g-scs-indirect-rate" type="number" step="0.01" value="${d.scs.indirectRate!==null && d.scs.indirectRate!==undefined ? d.scs.indirectRate : ''}" placeholder="e.g. 10 or 15"></div>
       <div id="scs-cat-rows">${d.scs.categories.map(c=>scsCatRowHTML(c)).join('')}</div>
       <button class="btn-ghost btn" id="add-scs-cat-btn" type="button">+ Add SCS category</button>
     </div>
@@ -725,7 +779,9 @@ function catRowHTML(c){
   return `<div class="cat-row" data-cat="${c.id}">
     <input class="cat-name" value="${escAttr(c.name)}" placeholder="Category name">
     <label style="margin:0;white-space:nowrap;">Budgeted&nbsp;</label>
-    <input class="cat-budget" type="number" step="0.01" style="width:120px;" value="${state.modal.draft.budgeted[c.id]||0}">
+    <input class="cat-budget" type="number" step="0.01" style="width:110px;" value="${state.modal.draft.budgeted[c.id]||0}">
+    <label style="margin:0;white-space:nowrap;font-size:11.5px;"><input type="checkbox" class="cat-indirect" ${c.isIndirect?'checked':''}> Indirect</label>
+    <label style="margin:0;white-space:nowrap;font-size:11.5px;"><input type="checkbox" class="cat-inkind" ${c.isInKind?'checked':''}> In-Kind</label>
     <button class="icon-x" data-remove-cat="${c.id}" type="button">✕</button>
   </div>`;
 }
@@ -733,7 +789,9 @@ function scsCatRowHTML(c){
   return `<div class="cat-row" data-cat="${c.id}">
     <input class="cat-name" value="${escAttr(c.name)}" placeholder="Category name">
     <label style="margin:0;white-space:nowrap;">Budgeted&nbsp;</label>
-    <input class="cat-budget" type="number" step="0.01" style="width:120px;" value="${state.modal.draft.scs.budgeted[c.id]||0}">
+    <input class="cat-budget" type="number" step="0.01" style="width:110px;" value="${state.modal.draft.scs.budgeted[c.id]||0}">
+    <label style="margin:0;white-space:nowrap;font-size:11.5px;"><input type="checkbox" class="cat-indirect" ${c.isIndirect?'checked':''}> Indirect</label>
+    <label style="margin:0;white-space:nowrap;font-size:11.5px;"><input type="checkbox" class="cat-inkind" ${c.isInKind?'checked':''}> In-Kind</label>
     <button class="icon-x" data-remove-scs-cat="${c.id}" type="button">✕</button>
   </div>`;
 }
@@ -756,6 +814,8 @@ function syncGrantDraftFromDOM(){
   if(g('g-start')) d.startDate = g('g-start').value;
   if(g('g-end')) d.endDate = g('g-end').value;
   if(g('g-tracking')) d.trackingMode = g('g-tracking').value;
+  if(g('g-indirect-rate')) d.indirectRate = g('g-indirect-rate').value===''? '' : Number(g('g-indirect-rate').value);
+  if(g('g-scs-indirect-rate')) d.scs.indirectRate = g('g-scs-indirect-rate').value===''? '' : Number(g('g-scs-indirect-rate').value);
   if(g('g-notes')) d.notes = g('g-notes').value;
   if(g('g-perf-freq')) d.reporting.performanceFrequency = g('g-perf-freq').value;
   if(g('g-perf-due')) d.reporting.performanceNextDue = g('g-perf-due').value;
@@ -767,7 +827,7 @@ function syncGrantDraftFromDOM(){
     const nameVal = row.querySelector('.cat-name').value;
     const budgetVal = Number(row.querySelector('.cat-budget').value)||0;
     const cat = d.categories.find(c=>c.id===id);
-    if(cat) cat.name = nameVal;
+    if(cat){ cat.name = nameVal; cat.isIndirect = row.querySelector('.cat-indirect').checked; cat.isInKind = row.querySelector('.cat-inkind').checked; }
     d.budgeted[id] = budgetVal;
   });
   document.querySelectorAll('#scs-cat-rows .cat-row').forEach(row=>{
@@ -775,7 +835,7 @@ function syncGrantDraftFromDOM(){
     const nameVal = row.querySelector('.cat-name').value;
     const budgetVal = Number(row.querySelector('.cat-budget').value)||0;
     const cat = d.scs.categories.find(c=>c.id===id);
-    if(cat) cat.name = nameVal;
+    if(cat){ cat.name = nameVal; cat.isIndirect = row.querySelector('.cat-indirect').checked; cat.isInKind = row.querySelector('.cat-inkind').checked; }
     d.scs.budgeted[id] = budgetVal;
   });
   document.querySelectorAll('#link-rows .link-row').forEach(row=>{
@@ -865,7 +925,8 @@ function renderGrantDetail(){
   <div class="page-head" style="margin-top:10px;">
     <div><div class="page-sub" style="text-transform:uppercase;letter-spacing:.04em;color:var(--brass);font-weight:600;">${esc(g.funderName)}</div>
     <h2>${esc(g.projectName)}</h2>
-    <div class="page-sub mono">${esc(g.agreementNumber)} ${g.classNumber?'· Class '+esc(g.classNumber):''} · ${fmtDate(g.startDate)} – ${fmtDate(g.endDate)} ${isLumpSum?'· <span style="color:var(--brass);">Lump sum</span>':''}</div></div>
+    ${g.classNumber?`<div class="page-sub" style="margin-top:1px;">Class ${esc(g.classNumber)}</div>`:''}
+    <div class="page-sub mono">${esc(g.agreementNumber)} · ${fmtDate(g.startDate)} – ${fmtDate(g.endDate)} ${isLumpSum?'· <span style="color:var(--brass);">Lump sum</span>':''}</div></div>
     <button class="btn-ghost btn" id="edit-grant-btn">Edit grant</button>
   </div>
   <div class="tabs">
@@ -880,36 +941,59 @@ function renderGrantDetail(){
   ${state.grantTab==='notes'? renderNotesTab(g) : ''}
   `;
 }
+function catBadge(c){
+  if(c.isIndirect) return ' <span class="status-pill" style="background:var(--brass-light);color:#6B4A17;">Indirect</span>';
+  if(c.isInKind) return ' <span class="status-pill" style="background:var(--sage);color:var(--forest-dark);">In-Kind</span>';
+  return '';
+}
 function renderBudgetTab(g, expended){
   const isLumpSum = g.trackingMode==='lumpsum';
-  const totB = totalBudgeted(g), totE = Object.values(expended).reduce((s,v)=>s+v,0);
   const grantorRows = g.categories.map(c=>{
     const bud = Number(g.budgeted[c.id]||0), exp = expended[c.id]||0, rem = bud-exp;
     const expCell = isLumpSum
       ? `<input class="lump-exp" data-scope="grantor" data-cat="${c.id}" type="number" step="0.01" style="width:110px;text-align:right;" value="${exp}">`
       : fmtMoney(exp);
-    return `<tr><td>${esc(c.name)}</td><td class="num">${fmtMoney(bud)}</td><td class="num">${expCell}</td><td class="num ${rem<0?'neg':''}">${fmtMoney(rem)}</td></tr>`;
+    return `<tr><td>${esc(c.name)}${catBadge(c)}</td><td class="num">${fmtMoney(bud)}</td><td class="num">${expCell}</td><td class="num ${rem<0?'neg':''}">${fmtMoney(rem)}</td></tr>`;
   }).join('');
+  const dirBud = directBudgeted(g), dirExp = directExpended(g.id);
+  const indBud = indirectBudgeted(g), indExp = indirectExpended(g.id);
+  const totB = totalBudgeted(g), totE = totalExpended(g.id);
+  const hasIndirectCat = g.categories.some(c=>c.isIndirect);
+  const subtotalRows = hasIndirectCat ? `
+    <tr class="total-row"><td>Direct Cost Subtotal</td><td class="num">${fmtMoney(dirBud)}</td><td class="num">${fmtMoney(dirExp)}</td><td class="num ${dirBud-dirExp<0?'neg':''}">${fmtMoney(dirBud-dirExp)}</td></tr>
+    <tr class="total-row"><td>Indirect Subtotal</td><td class="num">${fmtMoney(indBud)}</td><td class="num">${fmtMoney(indExp)}</td><td class="num ${indBud-indExp<0?'neg':''}">${fmtMoney(indBud-indExp)}</td></tr>
+    <tr class="total-row"><td>Total</td><td class="num">${fmtMoney(totB)}</td><td class="num">${fmtMoney(totE)}</td><td class="num ${totB-totE<0?'neg':''}">${fmtMoney(totB-totE)}</td></tr>` :
+    `<tr class="total-row"><td>Total</td><td class="num">${fmtMoney(totB)}</td><td class="num">${fmtMoney(totE)}</td><td class="num ${totB-totE<0?'neg':''}">${fmtMoney(totB-totE)}</td></tr>`;
+
   let scsBlock = '';
   if(g.scs && g.scs.enabled){
     const scsExpended = expendedByScsCategory(g.id);
-    const scsTotB = totalScsBudgeted(g), scsTotE = Object.values(scsExpended).reduce((s,v)=>s+v,0);
     const scsRows = g.scs.categories.map(c=>{
       const bud = Number(g.scs.budgeted[c.id]||0), exp = scsExpended[c.id]||0, rem = bud-exp;
       const expCell = isLumpSum
         ? `<input class="lump-exp" data-scope="scs" data-cat="${c.id}" type="number" step="0.01" style="width:110px;text-align:right;" value="${exp}">`
         : fmtMoney(exp);
-      return `<tr><td>${esc(c.name)}</td><td class="num">${fmtMoney(bud)}</td><td class="num">${expCell}</td><td class="num ${rem<0?'neg':''}">${fmtMoney(rem)}</td></tr>`;
+      return `<tr><td>${esc(c.name)}${catBadge(c)}</td><td class="num">${fmtMoney(bud)}</td><td class="num">${expCell}</td><td class="num ${rem<0?'neg':''}">${fmtMoney(rem)}</td></tr>`;
     }).join('');
+    const sDirBud = directScsBudgeted(g), sDirExp = directScsExpended(g.id);
+    const sIndBud = indirectScsBudgeted(g), sIndExp = indirectScsExpended(g.id);
+    const sTotB = totalScsBudgeted(g), sTotE = totalScsExpended(g.id);
+    const scsHasIndirect = g.scs.categories.some(c=>c.isIndirect);
+    const scsSubtotalRows = scsHasIndirect ? `
+      <tr class="total-row"><td>Direct Cost Subtotal</td><td class="num">${fmtMoney(sDirBud)}</td><td class="num">${fmtMoney(sDirExp)}</td><td class="num ${sDirBud-sDirExp<0?'neg':''}">${fmtMoney(sDirBud-sDirExp)}</td></tr>
+      <tr class="total-row"><td>Indirect Subtotal</td><td class="num">${fmtMoney(sIndBud)}</td><td class="num">${fmtMoney(sIndExp)}</td><td class="num ${sIndBud-sIndExp<0?'neg':''}">${fmtMoney(sIndBud-sIndExp)}</td></tr>
+      <tr class="total-row"><td>Total</td><td class="num">${fmtMoney(sTotB)}</td><td class="num">${fmtMoney(sTotE)}</td><td class="num ${sTotB-sTotE<0?'neg':''}">${fmtMoney(sTotB-sTotE)}</td></tr>` :
+      `<tr class="total-row"><td>Total</td><td class="num">${fmtMoney(sTotB)}</td><td class="num">${fmtMoney(sTotE)}</td><td class="num ${sTotB-sTotE<0?'neg':''}">${fmtMoney(sTotB-sTotE)}</td></tr>`;
     scsBlock = `<h3 style="font-size:15px;margin:20px 0 10px;">SCS Budget</h3>
       <div class="card">
         <table><thead><tr><th>Category</th><th class="num">Budgeted</th><th class="num">Expended</th><th class="num">Remaining</th></tr></thead>
         <tbody>${scsRows || '<tr><td colspan="4" style="color:var(--moss);">No SCS categories set — edit the grant to add them.</td></tr>'}
-        <tr class="total-row"><td>Total</td><td class="num">${fmtMoney(scsTotB)}</td><td class="num">${fmtMoney(scsTotE)}</td><td class="num ${scsTotB-scsTotE<0?'neg':''}">${fmtMoney(scsTotB-scsTotE)}</td></tr>
+        ${scsSubtotalRows}
         </tbody></table>
       </div>`;
   }
   return `<div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px;">
+    <button class="btn-ghost btn btn-sm" id="edit-budget-btn">Edit budget</button>
     ${isLumpSum?'<button class="btn btn-sm" id="save-lump-exp-btn">Save spending</button>':''}
     <button class="btn-ghost btn btn-sm" id="export-budget-excel">Export (Excel)</button>
     <button class="btn-ghost btn btn-sm" id="export-budget-pdf">Export (PDF)</button>
@@ -919,7 +1003,7 @@ function renderBudgetTab(g, expended){
     <table><thead><tr><th>Category</th><th class="num">Budgeted</th><th class="num">Expended</th><th class="num">Remaining</th></tr></thead>
     <tbody>
     ${grantorRows}
-    <tr class="total-row"><td>Total</td><td class="num">${fmtMoney(totB)}</td><td class="num">${fmtMoney(totE)}</td><td class="num ${totB-totE<0?'neg':''}">${fmtMoney(totB-totE)}</td></tr>
+    ${subtotalRows}
     </tbody></table>
   </div>
   ${scsBlock}`;
@@ -976,6 +1060,8 @@ function attachGrantDetailEvents(){
   document.querySelectorAll('[data-print]').forEach(b=> b.onclick = ()=> printInvoice(b.dataset.print));
   const editReporting = document.getElementById('edit-reporting-btn');
   if(editReporting) editReporting.onclick = ()=> openGrantModal(state.selectedGrantId);
+  const editBudgetBtn = document.getElementById('edit-budget-btn');
+  if(editBudgetBtn) editBudgetBtn.onclick = ()=> openGrantModal(state.selectedGrantId);
   const exBudgetExcel = document.getElementById('export-budget-excel');
   if(exBudgetExcel) exBudgetExcel.onclick = ()=> exportBudgetExcel(state.selectedGrantId);
   const exBudgetPdf = document.getElementById('export-budget-pdf');
@@ -1023,6 +1109,10 @@ function modalInvoiceHTML(){
   const g = getGrant(state.modal.grantId);
   const d = state.modal.draft;
   const hasScs = g.scs && g.scs.enabled;
+  const rateNote = (g.indirectRate!==null && g.indirectRate!==undefined && g.indirectRate!=='' && g.categories.some(c=>c.isIndirect))
+    ? `<p style="font-size:12px;color:var(--moss);margin:-4px 0 8px;">Indirect auto-calculates at ${g.indirectRate}% of direct costs as you type.</p>` : '';
+  const scsRateNote = hasScs && (g.scs.indirectRate!==null && g.scs.indirectRate!==undefined && g.scs.indirectRate!=='' && g.scs.categories.some(c=>c.isIndirect))
+    ? `<p style="font-size:12px;color:var(--moss);margin:-4px 0 8px;">SCS indirect auto-calculates at ${g.scs.indirectRate}% of direct costs as you type.</p>` : '';
   return `<div class="modal wide">
     <h3>${state.modal.invoiceId? 'Edit invoice':'Add invoice'} — ${esc(g.projectName)}</h3>
     <div class="row">
@@ -1031,12 +1121,14 @@ function modalInvoiceHTML(){
       <div class="field"><label>Period to</label><input id="i-to" type="date" value="${d.periodTo}"></div>
     </div>
     <h3 style="font-size:13px;margin:14px 0 6px;">Grantor amounts</h3>
+    ${rateNote}
     <table style="margin:0 0 10px;"><thead><tr><th>Category</th><th class="num">Amount</th></tr></thead>
-    <tbody>${g.categories.map(c=>`<tr><td>${esc(c.name)}</td><td class="num"><input class="i-amt" data-cat="${c.id}" type="number" step="0.01" style="width:120px;text-align:right;" value="${d.amounts[c.id]||0}"></td></tr>`).join('')}
+    <tbody>${g.categories.map(c=>`<tr><td>${esc(c.name)}${catBadge(c)}</td><td class="num"><input class="i-amt" data-cat="${c.id}" data-indirect="${c.isIndirect?'1':''}" type="number" step="0.01" style="width:120px;text-align:right;" value="${d.amounts[c.id]||0}"></td></tr>`).join('')}
     </tbody></table>
     ${hasScs?`<h3 style="font-size:13px;margin:14px 0 6px;">SCS amounts</h3>
+    ${scsRateNote}
     <table style="margin:0 0 10px;"><thead><tr><th>Category</th><th class="num">Amount</th></tr></thead>
-    <tbody>${g.scs.categories.map(c=>`<tr><td>${esc(c.name)}</td><td class="num"><input class="i-scs-amt" data-cat="${c.id}" type="number" step="0.01" style="width:120px;text-align:right;" value="${(d.scsAmounts||{})[c.id]||0}"></td></tr>`).join('')}
+    <tbody>${g.scs.categories.map(c=>`<tr><td>${esc(c.name)}${catBadge(c)}</td><td class="num"><input class="i-scs-amt" data-cat="${c.id}" data-indirect="${c.isIndirect?'1':''}" type="number" step="0.01" style="width:120px;text-align:right;" value="${(d.scsAmounts||{})[c.id]||0}"></td></tr>`).join('')}
     </tbody></table>`:''}
     <div class="row">
       <div class="field"><label>Sent date</label><input id="i-sent" type="date" value="${d.sentDate}"></div>
@@ -1050,8 +1142,34 @@ function modalInvoiceHTML(){
     </div>
   </div>`;
 }
+function recalcIndirectLine(selector, categories, rate){
+  if(rate===null || rate===undefined || rate==='') return;
+  const indirectCat = categories.find(c=>c.isIndirect && !c.isInKind);
+  if(!indirectCat) return;
+  let directSum = 0;
+  document.querySelectorAll(selector).forEach(inp=>{
+    if(inp.dataset.cat===indirectCat.id) return;
+    const cat = categories.find(c=>c.id===inp.dataset.cat);
+    if(cat && !cat.isInKind) directSum += Number(inp.value)||0;
+  });
+  const target = document.querySelector(`${selector}[data-cat="${indirectCat.id}"]`);
+  if(target) target.value = (directSum * (Number(rate)||0) / 100).toFixed(2);
+}
 function attachInvoiceModalEvents(){
+  const g = getGrant(state.modal.grantId);
   document.getElementById('modal-cancel').onclick = closeModal;
+  document.querySelectorAll('.i-amt').forEach(inp=>{
+    if(inp.dataset.indirect!=='1'){
+      inp.oninput = ()=> recalcIndirectLine('.i-amt', g.categories, g.indirectRate);
+    }
+  });
+  if(g.scs && g.scs.enabled){
+    document.querySelectorAll('.i-scs-amt').forEach(inp=>{
+      if(inp.dataset.indirect!=='1'){
+        inp.oninput = ()=> recalcIndirectLine('.i-scs-amt', g.scs.categories, g.scs.indirectRate);
+      }
+    });
+  }
   const delBtn = document.getElementById('del-inv-btn');
   if(delBtn) delBtn.onclick = async ()=>{
     if(!confirm('Delete this invoice?')) return;
@@ -1130,16 +1248,22 @@ function printBudgetReport(gid){
   const g = getGrant(gid); const expended = expendedByCategory(gid);
   const rows = g.categories.map(c=>{
     const bud = Number(g.budgeted[c.id]||0), exp = expended[c.id]||0;
-    return `<tr><td>${esc(c.name)}</td><td style="text-align:right;">${fmtMoney(bud)}</td><td style="text-align:right;">${fmtMoney(exp)}</td><td style="text-align:right;">${fmtMoney(bud-exp)}</td></tr>`;
+    return `<tr><td>${esc(c.name)}${c.isIndirect?' (Indirect)':c.isInKind?' (In-Kind)':''}</td><td style="text-align:right;">${fmtMoney(bud)}</td><td style="text-align:right;">${fmtMoney(exp)}</td><td style="text-align:right;">${fmtMoney(bud-exp)}</td></tr>`;
   }).join('');
   const totB = totalBudgeted(g), totE = totalExpended(gid);
+  const hasIndirect = g.categories.some(c=>c.isIndirect);
+  const subtotalRows = hasIndirect ? `
+    <tr><td><b>Direct Cost Subtotal</b></td><td style="text-align:right;"><b>${fmtMoney(directBudgeted(g))}</b></td><td style="text-align:right;"><b>${fmtMoney(directExpended(gid))}</b></td><td style="text-align:right;"><b>${fmtMoney(directBudgeted(g)-directExpended(gid))}</b></td></tr>
+    <tr><td><b>Indirect Subtotal</b></td><td style="text-align:right;"><b>${fmtMoney(indirectBudgeted(g))}</b></td><td style="text-align:right;"><b>${fmtMoney(indirectExpended(gid))}</b></td><td style="text-align:right;"><b>${fmtMoney(indirectBudgeted(g)-indirectExpended(gid))}</b></td></tr>
+    <tr><td><b>Total</b></td><td style="text-align:right;"><b>${fmtMoney(totB)}</b></td><td style="text-align:right;"><b>${fmtMoney(totE)}</b></td><td style="text-align:right;"><b>${fmtMoney(totB-totE)}</b></td></tr>` :
+    `<tr><td><b>Total</b></td><td style="text-align:right;"><b>${fmtMoney(totB)}</b></td><td style="text-align:right;"><b>${fmtMoney(totE)}</b></td><td style="text-align:right;"><b>${fmtMoney(totB-totE)}</b></td></tr>`;
   const hasScs = g.scs && g.scs.enabled;
   let scsSection = '';
   if(hasScs){
     const scsExpended = expendedByScsCategory(gid);
     const scsRows = g.scs.categories.map(c=>{
       const bud = Number(g.scs.budgeted[c.id]||0), exp = scsExpended[c.id]||0;
-      return `<tr><td>${esc(c.name)}</td><td style="text-align:right;">${fmtMoney(bud)}</td><td style="text-align:right;">${fmtMoney(exp)}</td><td style="text-align:right;">${fmtMoney(bud-exp)}</td></tr>`;
+      return `<tr><td>${esc(c.name)}${c.isIndirect?' (Indirect)':c.isInKind?' (In-Kind)':''}</td><td style="text-align:right;">${fmtMoney(bud)}</td><td style="text-align:right;">${fmtMoney(exp)}</td><td style="text-align:right;">${fmtMoney(bud-exp)}</td></tr>`;
     }).join('');
     const scsTotB = totalScsBudgeted(g), scsTotE = totalScsExpended(gid);
     scsSection = `<h3 style="margin-top:16px;font-size:13px;">SCS Budget</h3>
@@ -1154,7 +1278,7 @@ function printBudgetReport(gid){
     <h3 style="font-size:13px;">Grantor Budget</h3>
     <table class="inv-table" style="width:100%;">
       <thead><tr><th>Category</th><th style="text-align:right;">Budgeted</th><th style="text-align:right;">Expended</th><th style="text-align:right;">Remaining</th></tr></thead>
-      <tbody>${rows}<tr><td><b>Total</b></td><td style="text-align:right;"><b>${fmtMoney(totB)}</b></td><td style="text-align:right;"><b>${fmtMoney(totE)}</b></td><td style="text-align:right;"><b>${fmtMoney(totB-totE)}</b></td></tr></tbody>
+      <tbody>${rows}${subtotalRows}</tbody>
     </table>
     ${scsSection}
   `);
@@ -1290,10 +1414,26 @@ function exportReimbursementsExcel(){
 /* ============ REPORTING CALENDAR ============ */
 function renderReporting(){
   const dues = allReportingDues();
-  return `<div class="page-head"><div><h2>Reporting calendar</h2><div class="page-sub">All performance & financial reporting due dates, soonest first</div></div></div>
-  <div class="card">${dues.length? dues.map(d=>renderDueRow(d)).join('') : '<div class="empty">No reporting dates set yet.</div>'}</div>`;
+  const submitted = [];
+  state.grants.forEach(g=>{
+    if(g.reporting.performanceLastSubmitted) submitted.push({grant:g, type:'Performance report', date:g.reporting.performanceLastSubmitted});
+    if(g.reporting.financialLastSubmitted) submitted.push({grant:g, type:'Financial report', date:g.reporting.financialLastSubmitted});
+  });
+  submitted.sort((a,b)=> new Date(b.date) - new Date(a.date));
+  const tab = state.reportingTab || 'due';
+  return `<div class="page-head"><div><h2>Reporting calendar</h2><div class="page-sub">Track due dates and confirm what's been submitted</div></div></div>
+  <div class="tabs">
+    <div class="tab ${tab==='due'?'active':''}" data-rtab="due">Due</div>
+    <div class="tab ${tab==='submitted'?'active':''}" data-rtab="submitted">Submitted</div>
+  </div>
+  ${tab==='due'? `<div class="card">${dues.length? dues.map(d=>renderDueRow(d)).join('') : '<div class="empty">No reporting dates set yet.</div>'}</div>` : ''}
+  ${tab==='submitted'? `<div class="card">${submitted.length? submitted.map(s=>`<div class="due-row"><div><b>${esc(s.grant.funderName)}</b> — ${esc(s.grant.projectName)} · ${s.type}</div><span class="due-tag ok">Submitted ${fmtDate(s.date)}</span></div>`).join('') : '<div class="empty">Nothing marked submitted yet.</div>'}</div>` : ''}
+  `;
 }
-function attachReportingEvents(){ attachDueRowEvents(); }
+function attachReportingEvents(){
+  attachDueRowEvents();
+  document.querySelectorAll('[data-rtab]').forEach(t=> t.onclick = ()=>{ state.reportingTab = t.dataset.rtab; render(); });
+}
 
 /* ============ REIMBURSEMENTS (quarterly rollup) ============ */
 function renderReimbursements(){
