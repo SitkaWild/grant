@@ -91,7 +91,7 @@
   th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--moss);font-weight:600;padding:8px 10px;border-bottom:1.5px solid var(--line-strong);}
   td{padding:8px 10px;border-bottom:1px solid var(--line);}
   tr:last-child td{border-bottom:none;}
-  td.num,th.num{text-align:right;font-family:'Fragment Mono',monospace;}
+  td.num,th.num{text-align:right;font-family:'Fragment Mono',monospace;padding-right:18px;}
   tr.total-row td{font-weight:700;border-top:1.5px solid var(--line-strong);background:var(--sage);}
   .neg{color:var(--rust);}
 
@@ -158,8 +158,38 @@ const sb = (SUPABASE_URL.startsWith('http')) ? supabase.createClient(SUPABASE_UR
 const CONFIG_MISSING = !sb;
 
 /* ============ DATA HELPERS (Supabase) ============ */
+function migrateLegacyInKind(g){
+  const pullOut = (catArr, budgetedMap)=>{
+    const keep = [], moved = [];
+    (catArr||[]).forEach(c=>{ if(c && c.isInKind) moved.push(c); else keep.push(c); });
+    return {keep, moved};
+  };
+  const r1 = pullOut(g.categories, g.budgeted);
+  if(r1.moved.length){
+    g.categories = r1.keep;
+    g.inKind.enabled = true;
+    r1.moved.forEach(c=>{
+      g.inKind.categories.push({id:c.id, name:c.name});
+      g.inKind.budgeted[c.id] = Number(g.budgeted[c.id]||0);
+      delete g.budgeted[c.id];
+    });
+  }
+  if(g.scs && g.scs.categories){
+    const r2 = pullOut(g.scs.categories, g.scs.budgeted);
+    if(r2.moved.length){
+      g.scs.categories = r2.keep;
+      g.inKind.enabled = true;
+      r2.moved.forEach(c=>{
+        g.inKind.categories.push({id:c.id, name:c.name});
+        g.inKind.budgeted[c.id] = Number(g.scs.budgeted[c.id]||0);
+        delete g.scs.budgeted[c.id];
+      });
+    }
+  }
+  return g;
+}
 function rowToGrant(r){
-  return {
+  const g = {
     id: r.id, funderName: r.funder_name, projectName: r.project_name,
     agreementNumber: r.agreement_number, classNumber: r.class_number,
     grantAmount: r.grant_amount, startDate: r.start_date, endDate: r.end_date,
@@ -172,6 +202,7 @@ function rowToGrant(r){
     inKind: Object.assign({enabled:false, categories:[], budgeted:{}, contributed:{}, entries:[]}, r.in_kind || {}),
     links: r.links || []
   };
+  return migrateLegacyInKind(g);
 }
 function grantToRow(g){
   return {
@@ -192,7 +223,8 @@ function rowToInvoice(r){
     id: r.id, grantId: r.grant_id, invoiceNumber: r.invoice_number,
     periodFrom: r.period_from, periodTo: r.period_to, amounts: r.amounts || {},
     indirect: r.indirect, total: r.total, sentDate: r.sent_date, receivedDate: r.received_date, notes: r.notes,
-    scsAmounts: r.scs_amounts || {}, scsTotal: r.scs_total || 0
+    scsAmounts: r.scs_amounts || {}, scsTotal: r.scs_total || 0,
+    signatureData: r.signature_data || '', signerName: r.signer_name || '', signerTitle: r.signer_title || '', signatureDate: r.signature_date || ''
   };
 }
 function invoiceToRow(inv){
@@ -201,7 +233,9 @@ function invoiceToRow(inv){
     period_from: inv.periodFrom || null, period_to: inv.periodTo || null, amounts: inv.amounts,
     indirect: inv.indirect || 0, total: inv.total, sent_date: inv.sentDate || null,
     received_date: inv.receivedDate || null, notes: inv.notes,
-    scs_amounts: inv.scsAmounts || {}, scs_total: inv.scsTotal || 0
+    scs_amounts: inv.scsAmounts || {}, scs_total: inv.scsTotal || 0,
+    signature_data: inv.signatureData || null, signer_name: inv.signerName || null,
+    signer_title: inv.signerTitle || null, signature_date: inv.signatureDate || null
   };
 }
 
@@ -1008,7 +1042,7 @@ function renderBudgetTab(g, expended){
     const expCell = isLumpSum
       ? `<input class="lump-exp" data-scope="grantor" data-cat="${c.id}" type="number" step="0.01" style="width:110px;text-align:right;" value="${exp}">`
       : fmtMoney(exp);
-    return `<tr><td>${esc(c.name)}${catBadge(c)}</td><td class="num">${fmtMoney(bud)}</td><td class="num">${expCell}</td><td class="num ${rem<0?'neg':''}">${fmtMoney(rem)}</td></tr>`;
+    return `<tr><td>${esc(c.name)}${catBadge(c)}</td><td class="num">${fmtMoney(bud)}</td><td class="num">${expCell}</td><td class="num ${rem<0?'neg':''}"><b>${fmtMoney(rem)}</b></td></tr>`;
   }).join('');
   const dirBud = directBudgeted(g), dirExp = directExpended(g.id);
   const indBud = indirectBudgeted(g), indExp = indirectExpended(g.id);
@@ -1016,7 +1050,7 @@ function renderBudgetTab(g, expended){
   const hasIndirectCat = g.categories.some(c=>c.isIndirect);
   const subtotalRows = hasIndirectCat ? `
     <tr class="total-row"><td>Direct Cost Subtotal</td><td class="num">${fmtMoney(dirBud)}</td><td class="num">${fmtMoney(dirExp)}</td><td class="num ${dirBud-dirExp<0?'neg':''}">${fmtMoney(dirBud-dirExp)}</td></tr>
-    <tr class="total-row"><td>Indirect Subtotal</td><td class="num">${fmtMoney(indBud)}</td><td class="num">${fmtMoney(indExp)}</td><td class="num ${indBud-indExp<0?'neg':''}">${fmtMoney(indBud-indExp)}</td></tr>
+    <tr class="total-row"><td>Indirect</td><td class="num">${fmtMoney(indBud)}</td><td class="num">${fmtMoney(indExp)}</td><td class="num ${indBud-indExp<0?'neg':''}">${fmtMoney(indBud-indExp)}</td></tr>
     <tr class="total-row"><td>Total</td><td class="num">${fmtMoney(totB)}</td><td class="num">${fmtMoney(totE)}</td><td class="num ${totB-totE<0?'neg':''}">${fmtMoney(totB-totE)}</td></tr>` :
     `<tr class="total-row"><td>Total</td><td class="num">${fmtMoney(totB)}</td><td class="num">${fmtMoney(totE)}</td><td class="num ${totB-totE<0?'neg':''}">${fmtMoney(totB-totE)}</td></tr>`;
 
@@ -1028,7 +1062,7 @@ function renderBudgetTab(g, expended){
       const expCell = isLumpSum
         ? `<input class="lump-exp" data-scope="scs" data-cat="${c.id}" type="number" step="0.01" style="width:110px;text-align:right;" value="${exp}">`
         : fmtMoney(exp);
-      return `<tr><td>${esc(c.name)}${catBadge(c)}</td><td class="num">${fmtMoney(bud)}</td><td class="num">${expCell}</td><td class="num ${rem<0?'neg':''}">${fmtMoney(rem)}</td></tr>`;
+      return `<tr><td>${esc(c.name)}${catBadge(c)}</td><td class="num">${fmtMoney(bud)}</td><td class="num">${expCell}</td><td class="num ${rem<0?'neg':''}"><b>${fmtMoney(rem)}</b></td></tr>`;
     }).join('');
     const sDirBud = directScsBudgeted(g), sDirExp = directScsExpended(g.id);
     const sIndBud = indirectScsBudgeted(g), sIndExp = indirectScsExpended(g.id);
@@ -1036,7 +1070,7 @@ function renderBudgetTab(g, expended){
     const scsHasIndirect = g.scs.categories.some(c=>c.isIndirect);
     const scsSubtotalRows = scsHasIndirect ? `
       <tr class="total-row"><td>Direct Cost Subtotal</td><td class="num">${fmtMoney(sDirBud)}</td><td class="num">${fmtMoney(sDirExp)}</td><td class="num ${sDirBud-sDirExp<0?'neg':''}">${fmtMoney(sDirBud-sDirExp)}</td></tr>
-      <tr class="total-row"><td>Indirect Subtotal</td><td class="num">${fmtMoney(sIndBud)}</td><td class="num">${fmtMoney(sIndExp)}</td><td class="num ${sIndBud-sIndExp<0?'neg':''}">${fmtMoney(sIndBud-sIndExp)}</td></tr>
+      <tr class="total-row"><td>Indirect</td><td class="num">${fmtMoney(sIndBud)}</td><td class="num">${fmtMoney(sIndExp)}</td><td class="num ${sIndBud-sIndExp<0?'neg':''}">${fmtMoney(sIndBud-sIndExp)}</td></tr>
       <tr class="total-row"><td>Total</td><td class="num">${fmtMoney(sTotB)}</td><td class="num">${fmtMoney(sTotE)}</td><td class="num ${sTotB-sTotE<0?'neg':''}">${fmtMoney(sTotB-sTotE)}</td></tr>` :
       `<tr class="total-row"><td>Total</td><td class="num">${fmtMoney(sTotB)}</td><td class="num">${fmtMoney(sTotE)}</td><td class="num ${sTotB-sTotE<0?'neg':''}">${fmtMoney(sTotB-sTotE)}</td></tr>`;
     scsBlock = `<h3 style="font-size:15px;margin:20px 0 10px;">SCS Budget</h3>
@@ -1052,7 +1086,7 @@ function renderBudgetTab(g, expended){
     const contributedByCategory = contributedByInKindCategory(g);
     const inKindRows = g.inKind.categories.map(c=>{
       const bud = Number(g.inKind.budgeted[c.id]||0), con = contributedByCategory[c.id]||0, rem = bud-con;
-      return `<tr><td>${esc(c.name)}</td><td class="num">${fmtMoney(bud)}</td><td class="num">${fmtMoney(con)}</td><td class="num ${rem<0?'neg':''}">${fmtMoney(rem)}</td></tr>`;
+      return `<tr><td>${esc(c.name)}</td><td class="num">${fmtMoney(bud)}</td><td class="num">${fmtMoney(con)}</td><td class="num ${rem<0?'neg':''}"><b>${fmtMoney(rem)}</b></td></tr>`;
     }).join('');
     const ikTotB = totalInKindBudgeted(g), ikTotC = totalInKindContributed(g);
     inKindBlock = `<h3 style="font-size:15px;margin:20px 0 10px;">In-Kind <span style="font-weight:400;color:var(--moss);font-size:12.5px;">(tracked separately — not part of Direct/Indirect/Total)</span></h3>
@@ -1326,7 +1360,7 @@ function openInvoiceModal(grantId, invoiceId){
   const draft = existing ? JSON.parse(JSON.stringify(existing)) : {
     id: uid(), grantId, invoiceNumber: (grantInvoices(grantId).length+1),
     periodFrom:'', periodTo:'', amounts:{}, indirect:0, total:0, sentDate:'', receivedDate:'', notes:'',
-    scsAmounts:{}, scsTotal:0
+    scsAmounts:{}, scsTotal:0, signatureData:'', signerName:'', signerTitle:'', signatureDate:''
   };
   g.categories.forEach(c=>{ if(!(c.id in draft.amounts)) draft.amounts[c.id]=0; });
   if(g.scs && g.scs.enabled){
@@ -1344,28 +1378,48 @@ function modalInvoiceHTML(){
     ? `<p style="font-size:12px;color:var(--moss);margin:-4px 0 8px;">Indirect auto-calculates at ${g.indirectRate}% of direct costs as you type.</p>` : '';
   const scsRateNote = hasScs && (g.scs.indirectRate!==null && g.scs.indirectRate!==undefined && g.scs.indirectRate!=='' && g.scs.categories.some(c=>c.isIndirect))
     ? `<p style="font-size:12px;color:var(--moss);margin:-4px 0 8px;">SCS indirect auto-calculates at ${g.scs.indirectRate}% of direct costs as you type.</p>` : '';
+  const grantorTotalNow = g.categories.reduce((s,c)=> s + Number(d.amounts[c.id]||0), 0);
+  const scsTotalNow = hasScs ? g.scs.categories.reduce((s,c)=> s + Number((d.scsAmounts||{})[c.id]||0), 0) : 0;
   return `<div class="modal wide">
     <h3>${state.modal.invoiceId? 'Edit invoice':'Add invoice'} — ${esc(g.projectName)}</h3>
     <div class="row">
-      <div class="field"><label>Invoice #</label><input id="i-num" type="number" value="${d.invoiceNumber}"></div>
+      <div class="field"><label>Invoice #</label><input id="i-num" type="text" inputmode="numeric" value="${d.invoiceNumber}"></div>
       <div class="field"><label>Period from</label><input id="i-from" type="date" value="${d.periodFrom}"></div>
       <div class="field"><label>Period to</label><input id="i-to" type="date" value="${d.periodTo}"></div>
     </div>
-    <h3 style="font-size:13px;margin:14px 0 6px;">Grantor amounts</h3>
+    <h3 style="font-size:13px;margin:14px 0 6px;">Grantor Share</h3>
     ${rateNote}
-    <table style="margin:0 0 10px;"><thead><tr><th>Category</th><th class="num">Amount</th></tr></thead>
+    <table style="margin:0 0 4px;"><thead><tr><th>Category</th><th class="num">Amount</th></tr></thead>
     <tbody>${g.categories.map(c=>`<tr><td>${esc(c.name)}${catBadge(c)}</td><td class="num"><input class="i-amt" data-cat="${c.id}" data-indirect="${c.isIndirect?'1':''}" type="number" step="0.01" style="width:120px;text-align:right;" value="${d.amounts[c.id]||0}"></td></tr>`).join('')}
     </tbody></table>
+    <div style="text-align:right;font-size:13px;font-weight:600;margin:0 0 10px;">Total: <span id="i-grantor-total-display">${fmtMoney(grantorTotalNow)}</span></div>
     ${hasScs?`<h3 style="font-size:13px;margin:14px 0 6px;">SCS amounts</h3>
     ${scsRateNote}
-    <table style="margin:0 0 10px;"><thead><tr><th>Category</th><th class="num">Amount</th></tr></thead>
+    <table style="margin:0 0 4px;"><thead><tr><th>Category</th><th class="num">Amount</th></tr></thead>
     <tbody>${g.scs.categories.map(c=>`<tr><td>${esc(c.name)}${catBadge(c)}</td><td class="num"><input class="i-scs-amt" data-cat="${c.id}" data-indirect="${c.isIndirect?'1':''}" type="number" step="0.01" style="width:120px;text-align:right;" value="${(d.scsAmounts||{})[c.id]||0}"></td></tr>`).join('')}
-    </tbody></table>`:''}
+    </tbody></table>
+    <div style="text-align:right;font-size:13px;font-weight:600;margin:0 0 10px;">SCS Total: <span id="i-scs-total-display">${fmtMoney(scsTotalNow)}</span></div>`:''}
     <div class="row">
       <div class="field"><label>Sent date</label><input id="i-sent" type="date" value="${d.sentDate}"></div>
       <div class="field"><label>Payment received date</label><input id="i-recv" type="date" value="${d.receivedDate}"></div>
     </div>
     <div class="field"><label>Notes</label><input id="i-notes" value="${escAttr(d.notes||'')}"></div>
+
+    <h3 style="font-size:14px;margin:18px 0 10px;">Certifying signature</h3>
+    <div class="row">
+      <div class="field"><label>Printed name</label><input id="i-signer-name" value="${escAttr(d.signerName||'')}"></div>
+      <div class="field"><label>Title</label><input id="i-signer-title" value="${escAttr(d.signerTitle||'')}"></div>
+      <div class="field"><label>Date</label><input id="i-signature-date" type="date" value="${d.signatureDate||''}"></div>
+    </div>
+    <label>Signature — draw below, or upload an image</label>
+    <div style="border:1px solid var(--line-strong);border-radius:4px;background:#fff;">
+      <canvas id="i-sig-canvas" width="600" height="130" style="width:100%;height:130px;touch-action:none;cursor:crosshair;display:block;"></canvas>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:6px;align-items:center;">
+      <button class="btn-ghost btn btn-sm" id="i-sig-clear" type="button">Clear</button>
+      <label class="btn-ghost btn btn-sm" style="cursor:pointer;margin:0;">Upload image<input type="file" id="i-sig-upload" accept="image/*" style="display:none;"></label>
+    </div>
+
     <div class="modal-actions">
       ${state.modal.invoiceId?`<button class="btn-danger btn" id="del-inv-btn" style="margin-right:auto;">Delete</button>`:''}
       <button class="btn-ghost btn" id="modal-cancel">Cancel</button>
@@ -1386,21 +1440,87 @@ function recalcIndirectLine(selector, categories, rate){
   const target = document.querySelector(`${selector}[data-cat="${indirectCat.id}"]`);
   if(target) target.value = (directSum * (Number(rate)||0) / 100).toFixed(2);
 }
+function updateInvoiceTotalDisplays(g){
+  let grantorTotal = 0;
+  document.querySelectorAll('.i-amt').forEach(inp=> grantorTotal += Number(inp.value)||0);
+  const gd = document.getElementById('i-grantor-total-display');
+  if(gd) gd.textContent = fmtMoney(grantorTotal);
+  if(g.scs && g.scs.enabled){
+    let scsTotal = 0;
+    document.querySelectorAll('.i-scs-amt').forEach(inp=> scsTotal += Number(inp.value)||0);
+    const sd = document.getElementById('i-scs-total-display');
+    if(sd) sd.textContent = fmtMoney(scsTotal);
+  }
+}
+function setupSignaturePad(existingDataUrl){
+  const canvas = document.getElementById('i-sig-canvas');
+  if(!canvas) return;
+  const ctx = canvas.getContext('2d');
+  // match internal pixel size to displayed size for crisp lines
+  const ratio = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * ratio;
+  canvas.height = 130 * ratio;
+  ctx.scale(ratio, ratio);
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = '#20281F';
+  let drawing = false, lastX = 0, lastY = 0;
+  const pos = (e)=>{
+    const r = canvas.getBoundingClientRect();
+    const clientX = e.touches? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches? e.touches[0].clientY : e.clientY;
+    return {x: clientX - r.left, y: clientY - r.top};
+  };
+  const start = (e)=>{ drawing = true; const p = pos(e); lastX=p.x; lastY=p.y; e.preventDefault(); };
+  const move = (e)=>{
+    if(!drawing) return;
+    const p = pos(e);
+    ctx.beginPath(); ctx.moveTo(lastX,lastY); ctx.lineTo(p.x,p.y); ctx.stroke();
+    lastX=p.x; lastY=p.y; e.preventDefault();
+  };
+  const end = ()=>{ drawing = false; };
+  canvas.addEventListener('mousedown', start);
+  canvas.addEventListener('mousemove', move);
+  window.addEventListener('mouseup', end);
+  canvas.addEventListener('touchstart', start, {passive:false});
+  canvas.addEventListener('touchmove', move, {passive:false});
+  canvas.addEventListener('touchend', end);
+  if(existingDataUrl){
+    const img = new Image();
+    img.onload = ()=> ctx.drawImage(img, 0, 0, rect.width, 130);
+    img.src = existingDataUrl;
+  }
+  document.getElementById('i-sig-clear').onclick = ()=> ctx.clearRect(0,0,canvas.width,canvas.height);
+  document.getElementById('i-sig-upload').onchange = (e)=>{
+    const file = e.target.files[0]; if(!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev)=>{
+      const img = new Image();
+      img.onload = ()=>{ ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(img, 0, 0, rect.width, 130); };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
+}
 function attachInvoiceModalEvents(){
   const g = getGrant(state.modal.grantId);
   document.getElementById('modal-cancel').onclick = closeModal;
   document.querySelectorAll('.i-amt').forEach(inp=>{
+    inp.addEventListener('input', ()=> updateInvoiceTotalDisplays(g));
     if(inp.dataset.indirect!=='1'){
-      inp.oninput = ()=> recalcIndirectLine('.i-amt', g.categories, g.indirectRate);
+      inp.addEventListener('input', ()=> recalcIndirectLine('.i-amt', g.categories, g.indirectRate));
     }
   });
   if(g.scs && g.scs.enabled){
     document.querySelectorAll('.i-scs-amt').forEach(inp=>{
+      inp.addEventListener('input', ()=> updateInvoiceTotalDisplays(g));
       if(inp.dataset.indirect!=='1'){
-        inp.oninput = ()=> recalcIndirectLine('.i-scs-amt', g.scs.categories, g.scs.indirectRate);
+        inp.addEventListener('input', ()=> recalcIndirectLine('.i-scs-amt', g.scs.categories, g.scs.indirectRate));
       }
     });
   }
+  setupSignaturePad(state.modal.draft.signatureData);
   const delBtn = document.getElementById('del-inv-btn');
   if(delBtn) delBtn.onclick = async ()=>{
     if(!confirm('Delete this invoice?')) return;
@@ -1416,6 +1536,11 @@ function attachInvoiceModalEvents(){
     d.sentDate = document.getElementById('i-sent').value;
     d.receivedDate = document.getElementById('i-recv').value;
     d.notes = document.getElementById('i-notes').value;
+    d.signerName = document.getElementById('i-signer-name').value.trim();
+    d.signerTitle = document.getElementById('i-signer-title').value.trim();
+    d.signatureDate = document.getElementById('i-signature-date').value;
+    const canvas = document.getElementById('i-sig-canvas');
+    d.signatureData = canvas ? canvas.toDataURL('image/png') : d.signatureData;
     let total = 0;
     document.querySelectorAll('.i-amt').forEach(inp=>{
       const val = Number(inp.value)||0;
@@ -1443,7 +1568,10 @@ function attachInvoiceModalEvents(){
 /* ============ PRINT (PDF via browser print/save-as-PDF) ============ */
 function showPrintSheet(html){
   document.getElementById('printSheet').innerHTML = html;
+  const originalTitle = document.title;
+  document.title = ' ';
   window.print();
+  setTimeout(()=>{ document.title = originalTitle; }, 500);
 }
 function printInvoice(invoiceId){
   const inv = state.invoices.find(i=>i.id===invoiceId);
@@ -1464,15 +1592,16 @@ function printInvoice(invoiceId){
       <tr><td><b>Invoice #</b></td><td>${esc(inv.invoiceNumber)}</td><td><b>Period covered</b></td><td>${fmtDate(inv.periodFrom)} – ${fmtDate(inv.periodTo)}</td></tr>
     </table>
     <table class="inv-table" style="width:100%;">
-      <thead><tr><th colspan="2">Grantor amounts</th></tr></thead>
+      <thead><tr><th colspan="2">Grantor Share</th></tr></thead>
       <tbody>${rows}<tr><td><b>Total requested</b></td><td style="text-align:right;"><b>${fmtMoney(inv.total)}</b></td></tr></tbody>
     </table>
     ${hasScs? `<table class="inv-table" style="width:100%;">
       <thead><tr><th colspan="2">SCS amounts</th></tr></thead>
       <tbody>${scsRows}<tr><td><b>SCS total</b></td><td style="text-align:right;"><b>${fmtMoney(inv.scsTotal||0)}</b></td></tr></tbody>
     </table>` : ''}
-    <div class="sig-line">Signature of Authorized Certifying Official / Date</div>
-    <div class="sig-line" style="margin-top:30px;">Printed Name and Title</div>
+    ${inv.signatureData? `<img src="${inv.signatureData}" style="max-width:260px;max-height:80px;display:block;margin-top:20px;">` : ''}
+    <div class="sig-line">Signature of Authorized Certifying Official${inv.signatureDate? ' — '+fmtDate(inv.signatureDate) : ' / Date'}</div>
+    <div class="sig-line" style="margin-top:30px;">${inv.signerName? esc(inv.signerName)+(inv.signerTitle? ', '+esc(inv.signerTitle):'') : 'Printed Name and Title'}</div>
   `);
 }
 function printBudgetReport(gid){
@@ -1485,7 +1614,7 @@ function printBudgetReport(gid){
   const hasIndirect = g.categories.some(c=>c.isIndirect);
   const subtotalRows = hasIndirect ? `
     <tr><td><b>Direct Cost Subtotal</b></td><td style="text-align:right;"><b>${fmtMoney(directBudgeted(g))}</b></td><td style="text-align:right;"><b>${fmtMoney(directExpended(gid))}</b></td><td style="text-align:right;"><b>${fmtMoney(directBudgeted(g)-directExpended(gid))}</b></td></tr>
-    <tr><td><b>Indirect Subtotal</b></td><td style="text-align:right;"><b>${fmtMoney(indirectBudgeted(g))}</b></td><td style="text-align:right;"><b>${fmtMoney(indirectExpended(gid))}</b></td><td style="text-align:right;"><b>${fmtMoney(indirectBudgeted(g)-indirectExpended(gid))}</b></td></tr>
+    <tr><td><b>Indirect</b></td><td style="text-align:right;"><b>${fmtMoney(indirectBudgeted(g))}</b></td><td style="text-align:right;"><b>${fmtMoney(indirectExpended(gid))}</b></td><td style="text-align:right;"><b>${fmtMoney(indirectBudgeted(g)-indirectExpended(gid))}</b></td></tr>
     <tr><td><b>Total</b></td><td style="text-align:right;"><b>${fmtMoney(totB)}</b></td><td style="text-align:right;"><b>${fmtMoney(totE)}</b></td><td style="text-align:right;"><b>${fmtMoney(totB-totE)}</b></td></tr>` :
     `<tr><td><b>Total</b></td><td style="text-align:right;"><b>${fmtMoney(totB)}</b></td><td style="text-align:right;"><b>${fmtMoney(totE)}</b></td><td style="text-align:right;"><b>${fmtMoney(totB-totE)}</b></td></tr>`;
   const hasScs = g.scs && g.scs.enabled;
@@ -1704,12 +1833,19 @@ function renderReimbursements(){
     const label = quarterLabel(inv.sentDate || inv.periodTo, fy);
     if(!groups[label]) groups[label]=[];
     const g = getGrant(inv.grantId);
-    groups[label].push({kind:'grant', id:inv.id, name: g? `${g.funderName} — ${g.projectName}`:'Unknown grant', sub: g? g.agreementNumber:'', invoiceNumber: inv.invoiceNumber, amount: inv.total, sentDate: inv.sentDate, receivedDate: inv.receivedDate});
+    let directAmt = 0, indirectAmt = 0;
+    if(g){
+      g.categories.forEach(c=>{
+        const amt = Number(inv.amounts[c.id]||0);
+        if(c.isIndirect) indirectAmt += amt; else directAmt += amt;
+      });
+    }
+    groups[label].push({kind:'grant', id:inv.id, name: g? `${g.funderName} — ${g.projectName}`:'Unknown grant', sub: g? g.agreementNumber:'', invoiceNumber: inv.invoiceNumber, amount: inv.total, directAmt, indirectAmt, sentDate: inv.sentDate, receivedDate: inv.receivedDate});
   });
   state.standaloneInvoices.forEach(s=>{
     const label = quarterLabel(s.sentDate, fy);
     if(!groups[label]) groups[label]=[];
-    groups[label].push({kind:'standalone', id:s.id, name: s.billedTo || 'Standalone invoice', sub: s.description||'', invoiceNumber: s.invoiceNumber, amount: s.amount, sentDate: s.sentDate, receivedDate: s.receivedDate});
+    groups[label].push({kind:'standalone', id:s.id, name: s.billedTo || 'Standalone invoice', sub: s.description||'', invoiceNumber: s.invoiceNumber, amount: s.amount, directAmt:0, indirectAmt:0, sentDate: s.sentDate, receivedDate: s.receivedDate});
   });
   const labels = Object.keys(groups).sort((a,b)=>{
     const da = groups[a].map(x=>x.sentDate).filter(Boolean).sort().pop() || '';
@@ -1725,9 +1861,17 @@ function renderReimbursements(){
   ${labels.length? labels.map(label=>{
     const items = groups[label];
     const total = items.reduce((s,i)=>s+i.amount,0);
+    const direct = items.reduce((s,i)=>s+i.directAmt,0);
+    const indirect = items.reduce((s,i)=>s+i.indirectAmt,0);
     const received = items.filter(i=>i.receivedDate).reduce((s,i)=>s+i.amount,0);
     return `<div class="quarter-block card">
-      <h4>${label} — ${fmtMoney(total)} requested, ${fmtMoney(received)} received</h4>
+      <h4>${label}</h4>
+      <div style="display:flex;gap:24px;flex-wrap:wrap;margin:4px 0 14px;font-size:13px;">
+        <div><span style="color:var(--moss);">Direct costs requested</span><br><b>${fmtMoney(direct)}</b></div>
+        <div><span style="color:var(--moss);">Indirect costs requested</span><br><b>${fmtMoney(indirect)}</b></div>
+        <div><span style="color:var(--moss);">Total amount submitted</span><br><b>${fmtMoney(total)}</b></div>
+        <div><span style="color:var(--moss);">Received</span><br><b>${fmtMoney(received)}</b></div>
+      </div>
       <table><thead><tr><th>Grant / Billed to</th><th>Inv. #</th><th class="num">Amount</th><th>Sent</th><th>Received</th><th></th></tr></thead>
       <tbody>${items.map(i=>`<tr><td>${esc(i.name)}${i.sub?`<br><span class="mono" style="color:var(--moss);font-size:11px;">${esc(i.sub)}</span>`:''}${i.kind==='standalone'?'<span class="status-pill" style="margin-left:6px;background:var(--brass-light);color:#6B4A17;">Standalone</span>':''}</td><td class="mono">${esc(i.invoiceNumber)}</td><td class="num">${fmtMoney(i.amount)}</td><td>${fmtDate(i.sentDate)}</td><td>${i.receivedDate?fmtDate(i.receivedDate):'pending'}</td><td>${i.kind==='standalone'?`<button class="link-btn" data-print-standalone="${i.id}">Print</button> · <button class="link-btn" data-edit-standalone="${i.id}">Edit</button>`:''}</td></tr>`).join('')}</tbody></table>
     </div>`;
