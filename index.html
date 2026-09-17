@@ -552,8 +552,8 @@ function attachLoginEvents(){
   };
   document.addEventListener('keydown', window._loginKeyHandler);
 }
-function escAttr(s){ return (s||'').replace(/"/g,'&quot;'); }
-function esc(s){ return (s||'').replace(/[&<>]/g, c=> ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function escAttr(s){ if(s===null||s===undefined) return ''; return String(s).replace(/"/g,'&quot;'); }
+function esc(s){ if(s===null||s===undefined) return ''; return String(s).replace(/[&<>]/g, c=> ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 
 /* ============ SHELL ============ */
 function renderShell(){
@@ -1271,7 +1271,11 @@ function renderNotesTab(g){
   </div>`;
 }
 function attachGrantDetailEvents(){
-  document.getElementById('back-btn').onclick = ()=>{ state.selectedGrantId=null; render(); };
+  document.getElementById('back-btn').onclick = ()=>{
+    if(state.grantTab==='inkind'){ state.grantTab='budget'; }
+    else { state.selectedGrantId=null; }
+    render();
+  };
   document.getElementById('edit-grant-btn').onclick = ()=> openGrantModal(state.selectedGrantId);
   document.querySelectorAll('.tab').forEach(t=> t.onclick = ()=>{ state.grantTab = t.dataset.tab; render(); });
   const addInv = document.getElementById('add-invoice-btn');
