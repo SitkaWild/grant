@@ -169,6 +169,7 @@ function rowToGrant(r){
     expended: r.expended || {},
     indirectRate: r.indirect_rate,
     scs: Object.assign({enabled:false, categories:[], budgeted:{}, expended:{}, indirectRate:null}, r.scs || {}),
+    inKind: Object.assign({enabled:false, categories:[], budgeted:{}, contributed:{}, entries:[]}, r.in_kind || {}),
     links: r.links || []
   };
 }
@@ -182,6 +183,7 @@ function grantToRow(g){
     expended: g.expended || {},
     indirect_rate: (g.indirectRate===''||g.indirectRate===undefined) ? null : g.indirectRate,
     scs: g.scs || {enabled:false, categories:[], budgeted:{}, expended:{}, indirectRate:null},
+    in_kind: g.inKind || {enabled:false, categories:[], budgeted:{}, contributed:{}, entries:[]},
     links: g.links || []
   };
 }
@@ -338,44 +340,51 @@ function expendedByScsCategory(gid){
   });
   return out;
 }
-function totalBudgeted(g){ return g.categories.filter(c=>!c.isInKind).reduce((s,c)=> s + Number(g.budgeted[c.id]||0), 0); }
+function totalBudgeted(g){ return g.categories.reduce((s,c)=> s + Number(g.budgeted[c.id]||0), 0); }
 function totalExpended(gid){
   const g = getGrant(gid); if(!g) return 0;
   const e = expendedByCategory(gid);
-  return g.categories.filter(c=>!c.isInKind).reduce((s,c)=> s + (e[c.id]||0), 0);
+  return g.categories.reduce((s,c)=> s + (e[c.id]||0), 0);
 }
-function directBudgeted(g){ return g.categories.filter(c=>!c.isIndirect && !c.isInKind).reduce((s,c)=> s + Number(g.budgeted[c.id]||0), 0); }
-function indirectBudgeted(g){ return g.categories.filter(c=>c.isIndirect && !c.isInKind).reduce((s,c)=> s + Number(g.budgeted[c.id]||0), 0); }
+function directBudgeted(g){ return g.categories.filter(c=>!c.isIndirect).reduce((s,c)=> s + Number(g.budgeted[c.id]||0), 0); }
+function indirectBudgeted(g){ return g.categories.filter(c=>c.isIndirect).reduce((s,c)=> s + Number(g.budgeted[c.id]||0), 0); }
 function directExpended(gid){
   const g = getGrant(gid); if(!g) return 0;
   const e = expendedByCategory(gid);
-  return g.categories.filter(c=>!c.isIndirect && !c.isInKind).reduce((s,c)=> s + (e[c.id]||0), 0);
+  return g.categories.filter(c=>!c.isIndirect).reduce((s,c)=> s + (e[c.id]||0), 0);
 }
 function indirectExpended(gid){
   const g = getGrant(gid); if(!g) return 0;
   const e = expendedByCategory(gid);
-  return g.categories.filter(c=>c.isIndirect && !c.isInKind).reduce((s,c)=> s + (e[c.id]||0), 0);
+  return g.categories.filter(c=>c.isIndirect).reduce((s,c)=> s + (e[c.id]||0), 0);
 }
-function inKindCategories(g){ return g.categories.filter(c=>c.isInKind); }
-function totalScsBudgeted(g){ return (g.scs && g.scs.enabled) ? g.scs.categories.filter(c=>!c.isInKind).reduce((s,c)=> s + Number(g.scs.budgeted[c.id]||0), 0) : 0; }
+function totalScsBudgeted(g){ return (g.scs && g.scs.enabled) ? g.scs.categories.reduce((s,c)=> s + Number(g.scs.budgeted[c.id]||0), 0) : 0; }
 function totalScsExpended(gid){
   const g = getGrant(gid); if(!g || !g.scs || !g.scs.enabled) return 0;
   const e = expendedByScsCategory(gid);
-  return g.scs.categories.filter(c=>!c.isInKind).reduce((s,c)=> s + (e[c.id]||0), 0);
+  return g.scs.categories.reduce((s,c)=> s + (e[c.id]||0), 0);
 }
-function directScsBudgeted(g){ return (g.scs && g.scs.enabled) ? g.scs.categories.filter(c=>!c.isIndirect && !c.isInKind).reduce((s,c)=> s + Number(g.scs.budgeted[c.id]||0), 0) : 0; }
-function indirectScsBudgeted(g){ return (g.scs && g.scs.enabled) ? g.scs.categories.filter(c=>c.isIndirect && !c.isInKind).reduce((s,c)=> s + Number(g.scs.budgeted[c.id]||0), 0) : 0; }
+function directScsBudgeted(g){ return (g.scs && g.scs.enabled) ? g.scs.categories.filter(c=>!c.isIndirect).reduce((s,c)=> s + Number(g.scs.budgeted[c.id]||0), 0) : 0; }
+function indirectScsBudgeted(g){ return (g.scs && g.scs.enabled) ? g.scs.categories.filter(c=>c.isIndirect).reduce((s,c)=> s + Number(g.scs.budgeted[c.id]||0), 0) : 0; }
 function directScsExpended(gid){
   const g = getGrant(gid); if(!g || !g.scs || !g.scs.enabled) return 0;
   const e = expendedByScsCategory(gid);
-  return g.scs.categories.filter(c=>!c.isIndirect && !c.isInKind).reduce((s,c)=> s + (e[c.id]||0), 0);
+  return g.scs.categories.filter(c=>!c.isIndirect).reduce((s,c)=> s + (e[c.id]||0), 0);
 }
 function indirectScsExpended(gid){
   const g = getGrant(gid); if(!g || !g.scs || !g.scs.enabled) return 0;
   const e = expendedByScsCategory(gid);
-  return g.scs.categories.filter(c=>c.isIndirect && !c.isInKind).reduce((s,c)=> s + (e[c.id]||0), 0);
+  return g.scs.categories.filter(c=>c.isIndirect).reduce((s,c)=> s + (e[c.id]||0), 0);
 }
-function inKindScsCategories(g){ return (g.scs && g.scs.enabled) ? g.scs.categories.filter(c=>c.isInKind) : []; }
+function totalInKindBudgeted(g){ return (g.inKind && g.inKind.enabled) ? g.inKind.categories.reduce((s,c)=> s + Number(g.inKind.budgeted[c.id]||0), 0) : 0; }
+function inKindEntries(g){ return (g.inKind && g.inKind.entries) ? g.inKind.entries : []; }
+function contributedByInKindCategory(g){
+  const out = {}; if(!g.inKind || !g.inKind.enabled) return out;
+  g.inKind.categories.forEach(c=> out[c.id]=0);
+  inKindEntries(g).forEach(e=>{ if(out.hasOwnProperty(e.categoryId)) out[e.categoryId] += Number(e.value||0); });
+  return out;
+}
+function totalInKindContributed(g){ const byCategory = contributedByInKindCategory(g); return Object.values(byCategory).reduce((s,v)=>s+v,0); }
 function fmtMoney(n){ n = Number(n)||0; return '$' + n.toLocaleString('en-US',{minimumFractionDigits:2, maximumFractionDigits:2}); }
 function fmtDate(d){ if(!d) return '—'; const dt = new Date(d+'T00:00:00'); if(isNaN(dt)) return d; return dt.toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'}); }
 function daysUntil(d){ if(!d) return null; const today = new Date(); today.setHours(0,0,0,0); const dt = new Date(d+'T00:00:00'); return Math.round((dt-today)/86400000); }
@@ -683,6 +692,7 @@ function openGrantModal(grantId){
     budgeted:{}, reporting:{performanceFrequency:'',performanceLastSubmitted:'',performanceNextDue:'',financialFrequency:'',financialLastSubmitted:'',financialNextDue:''},
     trackingMode:'invoiced', expended:{}, indirectRate:'',
     scs:{enabled:false, categories:[], budgeted:{}, expended:{}, indirectRate:''},
+    inKind:{enabled:false, categories:[], budgeted:{}, contributed:{}, entries:[]},
     links:[]
   }};
   render();
@@ -699,12 +709,14 @@ function renderModal(){
   if(state.modal.type==='invoice') wrap.innerHTML = modalInvoiceHTML();
   if(state.modal.type==='staff') wrap.innerHTML = modalStaffHTML();
   if(state.modal.type==='standalone') wrap.innerHTML = modalStandaloneHTML();
+  if(state.modal.type==='inkindEntry') wrap.innerHTML = modalInKindEntryHTML();
   document.body.appendChild(wrap);
   wrap.onclick = (e)=>{ if(e.target===wrap){ state.modal=null; wrap.remove(); } };
   if(state.modal.type==='grant') attachGrantModalEvents();
   if(state.modal.type==='invoice') attachInvoiceModalEvents();
   if(state.modal.type==='staff') attachStaffModalEvents();
   if(state.modal.type==='standalone') attachStandaloneModalEvents();
+  if(state.modal.type==='inkindEntry') attachInKindEntryModalEvents();
   const newModalEl = wrap.querySelector('.modal');
   if(newModalEl && prevScroll) newModalEl.scrollTop = prevScroll;
 }
@@ -742,7 +754,7 @@ function modalGrantHTML(){
     <div class="field"><label>Notes</label><textarea id="g-notes" rows="2">${esc(d.notes)}</textarea></div>
 
     <h3 style="font-size:14px;margin:18px 0 10px;">Grantor budget categories</h3>
-    <p style="font-size:12px;color:var(--moss);margin:-4px 0 8px;">Check "Indirect" on the one category that should auto-calculate from direct costs at the rate above. Check "In-Kind" for categories that shouldn't count toward totals.</p>
+    <p style="font-size:12px;color:var(--moss);margin:-4px 0 8px;">Check "Indirect" on the one category that should auto-calculate from direct costs at the rate above. Check "Exclude from indirect base" for costs like Equipment that count as direct spending but aren't part of the base the indirect rate applies to.</p>
     <div id="cat-rows">${d.categories.map(c=>catRowHTML(c)).join('')}</div>
     <button class="btn-ghost btn" id="add-cat-btn" type="button">+ Add category</button>
 
@@ -752,6 +764,13 @@ function modalGrantHTML(){
       <div class="field" style="max-width:220px;"><label>SCS indirect rate (%)</label><input id="g-scs-indirect-rate" type="number" step="0.01" value="${d.scs.indirectRate!==null && d.scs.indirectRate!==undefined ? d.scs.indirectRate : ''}" placeholder="e.g. 10 or 15"></div>
       <div id="scs-cat-rows">${d.scs.categories.map(c=>scsCatRowHTML(c)).join('')}</div>
       <button class="btn-ghost btn" id="add-scs-cat-btn" type="button">+ Add SCS category</button>
+    </div>
+
+    <h3 style="font-size:14px;margin:18px 0 10px;">In-Kind</h3>
+    <div class="toggle-row"><input type="checkbox" id="g-inkind-enabled" ${d.inKind.enabled?'checked':''}> <label for="g-inkind-enabled">Track In-Kind contributions for this grant (separate from Direct/Indirect/Total — not invoiced)</label></div>
+    <div id="inkind-section" style="${d.inKind.enabled?'':'display:none;'}">
+      <div id="inkind-cat-rows">${d.inKind.categories.map(c=>inKindCatRowHTML(c)).join('')}</div>
+      <button class="btn-ghost btn" id="add-inkind-cat-btn" type="button">+ Add In-Kind item</button>
     </div>
 
     <h3 style="font-size:14px;margin:18px 0 10px;">Reporting</h3>
@@ -781,7 +800,7 @@ function catRowHTML(c){
     <label style="margin:0;white-space:nowrap;">Budgeted&nbsp;</label>
     <input class="cat-budget" type="number" step="0.01" style="width:110px;" value="${state.modal.draft.budgeted[c.id]||0}">
     <label style="margin:0;white-space:nowrap;font-size:11.5px;"><input type="checkbox" class="cat-indirect" ${c.isIndirect?'checked':''}> Indirect</label>
-    <label style="margin:0;white-space:nowrap;font-size:11.5px;"><input type="checkbox" class="cat-inkind" ${c.isInKind?'checked':''}> In-Kind</label>
+    <label style="margin:0;white-space:nowrap;font-size:11.5px;"><input type="checkbox" class="cat-exclude-base" ${c.excludeFromIndirectBase?'checked':''}> Exclude from indirect base</label>
     <button class="icon-x" data-remove-cat="${c.id}" type="button">✕</button>
   </div>`;
 }
@@ -791,8 +810,16 @@ function scsCatRowHTML(c){
     <label style="margin:0;white-space:nowrap;">Budgeted&nbsp;</label>
     <input class="cat-budget" type="number" step="0.01" style="width:110px;" value="${state.modal.draft.scs.budgeted[c.id]||0}">
     <label style="margin:0;white-space:nowrap;font-size:11.5px;"><input type="checkbox" class="cat-indirect" ${c.isIndirect?'checked':''}> Indirect</label>
-    <label style="margin:0;white-space:nowrap;font-size:11.5px;"><input type="checkbox" class="cat-inkind" ${c.isInKind?'checked':''}> In-Kind</label>
+    <label style="margin:0;white-space:nowrap;font-size:11.5px;"><input type="checkbox" class="cat-exclude-base" ${c.excludeFromIndirectBase?'checked':''}> Exclude from indirect base</label>
     <button class="icon-x" data-remove-scs-cat="${c.id}" type="button">✕</button>
+  </div>`;
+}
+function inKindCatRowHTML(c){
+  return `<div class="cat-row" data-cat="${c.id}">
+    <input class="cat-name" value="${escAttr(c.name)}" placeholder="In-Kind item name">
+    <label style="margin:0;white-space:nowrap;">Budgeted&nbsp;</label>
+    <input class="cat-budget" type="number" step="0.01" style="width:110px;" value="${state.modal.draft.inKind.budgeted[c.id]||0}">
+    <button class="icon-x" data-remove-inkind-cat="${c.id}" type="button">✕</button>
   </div>`;
 }
 function linkRowHTML(l){
@@ -822,12 +849,13 @@ function syncGrantDraftFromDOM(){
   if(g('g-fin-freq')) d.reporting.financialFrequency = g('g-fin-freq').value;
   if(g('g-fin-due')) d.reporting.financialNextDue = g('g-fin-due').value;
   if(g('g-scs-enabled')) d.scs.enabled = g('g-scs-enabled').checked;
+  if(g('g-inkind-enabled')) d.inKind.enabled = g('g-inkind-enabled').checked;
   document.querySelectorAll('#cat-rows .cat-row').forEach(row=>{
     const id = row.dataset.cat;
     const nameVal = row.querySelector('.cat-name').value;
     const budgetVal = Number(row.querySelector('.cat-budget').value)||0;
     const cat = d.categories.find(c=>c.id===id);
-    if(cat){ cat.name = nameVal; cat.isIndirect = row.querySelector('.cat-indirect').checked; cat.isInKind = row.querySelector('.cat-inkind').checked; }
+    if(cat){ cat.name = nameVal; cat.isIndirect = row.querySelector('.cat-indirect').checked; cat.excludeFromIndirectBase = row.querySelector('.cat-exclude-base').checked; }
     d.budgeted[id] = budgetVal;
   });
   document.querySelectorAll('#scs-cat-rows .cat-row').forEach(row=>{
@@ -835,8 +863,16 @@ function syncGrantDraftFromDOM(){
     const nameVal = row.querySelector('.cat-name').value;
     const budgetVal = Number(row.querySelector('.cat-budget').value)||0;
     const cat = d.scs.categories.find(c=>c.id===id);
-    if(cat){ cat.name = nameVal; cat.isIndirect = row.querySelector('.cat-indirect').checked; cat.isInKind = row.querySelector('.cat-inkind').checked; }
+    if(cat){ cat.name = nameVal; cat.isIndirect = row.querySelector('.cat-indirect').checked; cat.excludeFromIndirectBase = row.querySelector('.cat-exclude-base').checked; }
     d.scs.budgeted[id] = budgetVal;
+  });
+  document.querySelectorAll('#inkind-cat-rows .cat-row').forEach(row=>{
+    const id = row.dataset.cat;
+    const nameVal = row.querySelector('.cat-name').value;
+    const budgetVal = Number(row.querySelector('.cat-budget').value)||0;
+    const cat = d.inKind.categories.find(c=>c.id===id);
+    if(cat) cat.name = nameVal;
+    d.inKind.budgeted[id] = budgetVal;
   });
   document.querySelectorAll('#link-rows .link-row').forEach(row=>{
     const id = row.dataset.link;
@@ -848,6 +884,9 @@ function attachGrantModalEvents(){
   document.getElementById('modal-cancel').onclick = closeModal;
   document.getElementById('g-scs-enabled').onchange = (e)=>{
     document.getElementById('scs-section').style.display = e.target.checked? '' : 'none';
+  };
+  document.getElementById('g-inkind-enabled').onchange = (e)=>{
+    document.getElementById('inkind-section').style.display = e.target.checked? '' : 'none';
   };
   document.getElementById('add-cat-btn').onclick = ()=>{
     syncGrantDraftFromDOM();
@@ -875,6 +914,20 @@ function attachGrantModalEvents(){
     const id = b.dataset.removeScsCat;
     state.modal.draft.scs.categories = state.modal.draft.scs.categories.filter(c=>c.id!==id);
     delete state.modal.draft.scs.budgeted[id];
+    renderModal();
+  });
+  document.getElementById('add-inkind-cat-btn').onclick = ()=>{
+    syncGrantDraftFromDOM();
+    const newCat = {id:uid(), name:''};
+    state.modal.draft.inKind.categories.push(newCat);
+    state.modal.draft.inKind.budgeted[newCat.id]=0;
+    renderModal();
+  };
+  document.querySelectorAll('[data-remove-inkind-cat]').forEach(b=> b.onclick = ()=>{
+    syncGrantDraftFromDOM();
+    const id = b.dataset.removeInkindCat;
+    state.modal.draft.inKind.categories = state.modal.draft.inKind.categories.filter(c=>c.id!==id);
+    delete state.modal.draft.inKind.budgeted[id];
     renderModal();
   });
   document.getElementById('add-link-btn').onclick = ()=>{
@@ -932,18 +985,20 @@ function renderGrantDetail(){
   <div class="tabs">
     <div class="tab ${state.grantTab==='budget'?'active':''}" data-tab="budget">Budget</div>
     ${isLumpSum?'':`<div class="tab ${state.grantTab==='invoices'?'active':''}" data-tab="invoices">Invoices</div>`}
+    ${g.inKind && g.inKind.enabled?`<div class="tab ${state.grantTab==='inkind'?'active':''}" data-tab="inkind">In-Kind Log</div>`:''}
     <div class="tab ${state.grantTab==='reporting'?'active':''}" data-tab="reporting">Reporting</div>
     <div class="tab ${state.grantTab==='notes'?'active':''}" data-tab="notes">Notes & Links</div>
   </div>
   ${state.grantTab==='budget'? renderBudgetTab(g, expended) : ''}
   ${state.grantTab==='invoices' && !isLumpSum? renderInvoicesTab(g) : ''}
+  ${state.grantTab==='inkind' && g.inKind && g.inKind.enabled? renderInKindLogTab(g) : ''}
   ${state.grantTab==='reporting'? renderReportingTab(g) : ''}
   ${state.grantTab==='notes'? renderNotesTab(g) : ''}
   `;
 }
 function catBadge(c){
   if(c.isIndirect) return ' <span class="status-pill" style="background:var(--brass-light);color:#6B4A17;">Indirect</span>';
-  if(c.isInKind) return ' <span class="status-pill" style="background:var(--sage);color:var(--forest-dark);">In-Kind</span>';
+  if(c.excludeFromIndirectBase) return ' <span class="status-pill" style="background:var(--sage);color:var(--forest-dark);">Excl. from base</span>';
   return '';
 }
 function renderBudgetTab(g, expended){
@@ -992,6 +1047,23 @@ function renderBudgetTab(g, expended){
         </tbody></table>
       </div>`;
   }
+  let inKindBlock = '';
+  if(g.inKind && g.inKind.enabled){
+    const contributedByCategory = contributedByInKindCategory(g);
+    const inKindRows = g.inKind.categories.map(c=>{
+      const bud = Number(g.inKind.budgeted[c.id]||0), con = contributedByCategory[c.id]||0, rem = bud-con;
+      return `<tr><td>${esc(c.name)}</td><td class="num">${fmtMoney(bud)}</td><td class="num">${fmtMoney(con)}</td><td class="num ${rem<0?'neg':''}">${fmtMoney(rem)}</td></tr>`;
+    }).join('');
+    const ikTotB = totalInKindBudgeted(g), ikTotC = totalInKindContributed(g);
+    inKindBlock = `<h3 style="font-size:15px;margin:20px 0 10px;">In-Kind <span style="font-weight:400;color:var(--moss);font-size:12.5px;">(tracked separately — not part of Direct/Indirect/Total)</span></h3>
+      <div class="card">
+        <div style="display:flex;justify-content:flex-end;margin-bottom:8px;"><button class="btn-ghost btn btn-sm" id="goto-inkind-log-btn">View / add In-Kind records →</button></div>
+        <table><thead><tr><th>Item</th><th class="num">Budgeted</th><th class="num">Contributed</th><th class="num">Remaining</th></tr></thead>
+        <tbody>${inKindRows || '<tr><td colspan="4" style="color:var(--moss);">No In-Kind items set — edit the grant to add them.</td></tr>'}
+        <tr class="total-row"><td>Total</td><td class="num">${fmtMoney(ikTotB)}</td><td class="num">${fmtMoney(ikTotC)}</td><td class="num ${ikTotB-ikTotC<0?'neg':''}">${fmtMoney(ikTotB-ikTotC)}</td></tr>
+        </tbody></table>
+      </div>`;
+  }
   return `<div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px;">
     <button class="btn-ghost btn btn-sm" id="edit-budget-btn">Edit budget</button>
     ${isLumpSum?'<button class="btn btn-sm" id="save-lump-exp-btn">Save spending</button>':''}
@@ -1006,7 +1078,8 @@ function renderBudgetTab(g, expended){
     ${subtotalRows}
     </tbody></table>
   </div>
-  ${scsBlock}`;
+  ${scsBlock}
+  ${inKindBlock}`;
 }
 function renderInvoicesTab(g){
   const invs = grantInvoices(g.id);
@@ -1028,6 +1101,153 @@ function renderInvoicesTab(g){
       <td><button class="link-btn" data-print="${inv.id}">Print</button> · <button class="link-btn" data-edit-inv="${inv.id}">Edit</button></td>
     </tr>`).join('')}</tbody></table>` : '<div class="empty">No invoices yet for this grant.</div>'}
   </div>`;
+}
+function inKindCatName(g, categoryId){ const c = g.inKind.categories.find(c=>c.id===categoryId); return c? c.name : '—'; }
+function renderInKindLogTab(g){
+  const entries = inKindEntries(g).slice().sort((a,b)=> new Date(b.date||0) - new Date(a.date||0));
+  return `<div class="page-head" style="margin-bottom:12px;"><div class="page-sub">Documented record behind every In-Kind dollar — required for compliance</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn-ghost btn" id="export-inkind-excel">Export (Excel)</button>
+      <button class="btn" id="add-inkind-entry-btn">+ Add In-Kind record</button>
+    </div></div>
+  <div class="card">
+    ${entries.length? `<table><thead><tr><th>Item</th><th>Type</th><th>Contributor</th><th>Date</th><th class="num">Hours</th><th class="num">Rate</th><th class="num">Value</th><th>Approved by</th><th></th></tr></thead>
+    <tbody>${entries.map(e=>`<tr>
+      <td>${esc(inKindCatName(g, e.categoryId))}</td>
+      <td>${e.type==='property'?'Property/Space':'Volunteer time'}</td>
+      <td>${esc(e.contributorName)}</td>
+      <td>${fmtDate(e.date)}</td>
+      <td class="num">${e.type==='volunteer'? (e.hours||0) : '—'}</td>
+      <td class="num">${e.type==='volunteer'? fmtMoney(e.rate||0) : '—'}</td>
+      <td class="num">${fmtMoney(e.value)}</td>
+      <td>${esc(e.approvedBy)}</td>
+      <td><button class="link-btn" data-edit-inkind-entry="${e.id}">Edit</button></td>
+    </tr>`).join('')}</tbody></table>` : '<div class="empty">No In-Kind records yet.</div>'}
+  </div>`;
+}
+function openInKindEntryModal(entryId){
+  const g = getGrant(state.selectedGrantId);
+  const existing = entryId ? inKindEntries(g).find(e=>e.id===entryId) : null;
+  const draft = existing ? JSON.parse(JSON.stringify(existing)) : {
+    id: uid(), categoryId: (g.inKind.categories[0] && g.inKind.categories[0].id) || '', type:'volunteer',
+    contributorName:'', date:'', hours:0, rate:0, description:'', value:0, approvedBy:'', notes:''
+  };
+  state.modal = {type:'inkindEntry', entryId, draft};
+  render(); renderModal();
+}
+function modalInKindEntryHTML(){
+  const g = getGrant(state.selectedGrantId);
+  const d = state.modal.draft;
+  const isVolunteer = d.type!=='property';
+  return `<div class="modal">
+    <h3>${state.modal.entryId? 'Edit In-Kind record':'Add In-Kind record'}</h3>
+    <div class="row">
+      <div class="field"><label>In-Kind item</label>
+        <select id="ik-category">${g.inKind.categories.map(c=>`<option value="${c.id}" ${d.categoryId===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
+      </div>
+      <div class="field"><label>Type</label>
+        <select id="ik-type">
+          <option value="volunteer" ${isVolunteer?'selected':''}>Volunteer time</option>
+          <option value="property" ${!isVolunteer?'selected':''}>Property or space donated</option>
+        </select>
+      </div>
+    </div>
+    <div class="row">
+      <div class="field"><label id="ik-name-label">${isVolunteer?"Volunteer's name":"Donor / property owner"}</label><input id="ik-contributor" value="${escAttr(d.contributorName)}"></div>
+      <div class="field"><label>Date</label><input id="ik-date" type="date" value="${d.date||''}"></div>
+    </div>
+    <div id="ik-volunteer-fields" style="${isVolunteer?'':'display:none;'}">
+      <div class="row">
+        <div class="field"><label>Hours contributed</label><input id="ik-hours" type="number" step="0.25" value="${d.hours||0}"></div>
+        <div class="field"><label>Rate used to value time ($/hr)</label><input id="ik-rate" type="number" step="0.01" value="${d.rate||0}"></div>
+      </div>
+      <div class="field"><label>Activity description</label><textarea id="ik-desc-v" rows="2" placeholder="What the volunteer did">${esc(d.description)}</textarea></div>
+    </div>
+    <div id="ik-property-fields" style="${isVolunteer?'display:none;':''}">
+      <div class="field"><label>Description of property / space</label><textarea id="ik-desc-p" rows="2" placeholder="What was donated">${esc(d.description)}</textarea></div>
+      <div class="field"><label>Value ($)</label><input id="ik-value-p" type="number" step="0.01" value="${d.value||0}"></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>Approved by</label><input id="ik-approved" value="${escAttr(d.approvedBy)}"></div>
+      <div class="field"><label>Computed value</label><input id="ik-value-display" value="${fmtMoney(d.value||0)}" disabled style="background:var(--sage);"></div>
+    </div>
+    <div class="field"><label>Notes</label><input id="ik-notes" value="${escAttr(d.notes||'')}"></div>
+    <div class="modal-actions">
+      ${state.modal.entryId?`<button class="btn-danger btn" id="del-inkind-entry-btn" style="margin-right:auto;">Delete</button>`:''}
+      <button class="btn-ghost btn" id="modal-cancel">Cancel</button>
+      <button class="btn" id="modal-save-inkind-entry">Save record</button>
+    </div>
+  </div>`;
+}
+function attachInKindEntryModalEvents(){
+  document.getElementById('modal-cancel').onclick = closeModal;
+  const recalcVolunteerValue = ()=>{
+    const hours = Number(document.getElementById('ik-hours').value)||0;
+    const rate = Number(document.getElementById('ik-rate').value)||0;
+    document.getElementById('ik-value-display').value = fmtMoney(hours*rate);
+  };
+  document.getElementById('ik-type').onchange = (e)=>{
+    const isVolunteer = e.target.value==='volunteer';
+    document.getElementById('ik-volunteer-fields').style.display = isVolunteer? '' : 'none';
+    document.getElementById('ik-property-fields').style.display = isVolunteer? 'none' : '';
+    document.getElementById('ik-name-label').textContent = isVolunteer? "Volunteer's name" : 'Donor / property owner';
+    if(isVolunteer) recalcVolunteerValue();
+    else document.getElementById('ik-value-display').value = fmtMoney(Number(document.getElementById('ik-value-p').value)||0);
+  };
+  const hoursEl = document.getElementById('ik-hours'), rateEl = document.getElementById('ik-rate');
+  if(hoursEl) hoursEl.oninput = recalcVolunteerValue;
+  if(rateEl) rateEl.oninput = recalcVolunteerValue;
+  const valPEl = document.getElementById('ik-value-p');
+  if(valPEl) valPEl.oninput = ()=> document.getElementById('ik-value-display').value = fmtMoney(Number(valPEl.value)||0);
+  const delBtn = document.getElementById('del-inkind-entry-btn');
+  if(delBtn) delBtn.onclick = async ()=>{
+    if(!confirm('Delete this In-Kind record?')) return;
+    const g = getGrant(state.selectedGrantId);
+    g.inKind.entries = inKindEntries(g).filter(e=>e.id!==state.modal.entryId);
+    const ok = await saveGrant(g);
+    if(!ok) return;
+    const idx = state.grants.findIndex(x=>x.id===g.id);
+    if(idx>=0) state.grants[idx]=g;
+    state.modal=null; render();
+  };
+  document.getElementById('modal-save-inkind-entry').onclick = async ()=>{
+    const d = state.modal.draft;
+    d.categoryId = document.getElementById('ik-category').value;
+    d.type = document.getElementById('ik-type').value;
+    d.contributorName = document.getElementById('ik-contributor').value.trim();
+    d.date = document.getElementById('ik-date').value;
+    d.approvedBy = document.getElementById('ik-approved').value.trim();
+    d.notes = document.getElementById('ik-notes').value;
+    if(d.type==='volunteer'){
+      d.hours = Number(document.getElementById('ik-hours').value)||0;
+      d.rate = Number(document.getElementById('ik-rate').value)||0;
+      d.description = document.getElementById('ik-desc-v').value;
+      d.value = d.hours * d.rate;
+    } else {
+      d.hours = 0; d.rate = 0;
+      d.description = document.getElementById('ik-desc-p').value;
+      d.value = Number(document.getElementById('ik-value-p').value)||0;
+    }
+    if(!d.contributorName){ alert('Enter a name.'); return; }
+    const g = getGrant(state.selectedGrantId);
+    g.inKind.entries = g.inKind.entries || [];
+    const idx = g.inKind.entries.findIndex(e=>e.id===d.id);
+    if(idx>=0) g.inKind.entries[idx]=d; else g.inKind.entries.push(d);
+    const ok = await saveGrant(g);
+    if(!ok) return;
+    const gIdx = state.grants.findIndex(x=>x.id===g.id);
+    if(gIdx>=0) state.grants[gIdx]=g;
+    state.modal=null;
+    render();
+  };
+}
+function exportInKindExcel(gid){
+  const g = getGrant(gid); if(!g) return;
+  const rows = [['Item','Type','Contributor','Date','Hours','Rate','Value','Approved By','Description','Notes']];
+  inKindEntries(g).forEach(e=>{
+    rows.push([inKindCatName(g,e.categoryId), e.type==='property'?'Property/Space':'Volunteer time', e.contributorName, e.date, e.type==='volunteer'?e.hours:'', e.type==='volunteer'?e.rate:'', e.value, e.approvedBy, e.description, e.notes]);
+  });
+  downloadExcel(`inkind-log-${(g.agreementNumber||g.id).replace(/[^a-z0-9-]/gi,'')}.xlsx`, [{name:'In-Kind Log', rows}]);
 }
 function renderReportingTab(g){
   return `<div class="card">
@@ -1086,6 +1306,13 @@ function attachGrantDetailEvents(){
     if(idx>=0) state.grants[idx]=g;
     render();
   };
+  const gotoInKindLog = document.getElementById('goto-inkind-log-btn');
+  if(gotoInKindLog) gotoInKindLog.onclick = ()=>{ state.grantTab='inkind'; render(); };
+  const addInKindEntryBtn = document.getElementById('add-inkind-entry-btn');
+  if(addInKindEntryBtn) addInKindEntryBtn.onclick = ()=> openInKindEntryModal(null);
+  document.querySelectorAll('[data-edit-inkind-entry]').forEach(b=> b.onclick = ()=> openInKindEntryModal(b.dataset.editInkindEntry));
+  const exInKindExcel = document.getElementById('export-inkind-excel');
+  if(exInKindExcel) exInKindExcel.onclick = ()=> exportInKindExcel(state.selectedGrantId);
 }
 
 /* ============ INVOICE MODAL ============ */
@@ -1144,13 +1371,13 @@ function modalInvoiceHTML(){
 }
 function recalcIndirectLine(selector, categories, rate){
   if(rate===null || rate===undefined || rate==='') return;
-  const indirectCat = categories.find(c=>c.isIndirect && !c.isInKind);
+  const indirectCat = categories.find(c=>c.isIndirect);
   if(!indirectCat) return;
   let directSum = 0;
   document.querySelectorAll(selector).forEach(inp=>{
     if(inp.dataset.cat===indirectCat.id) return;
     const cat = categories.find(c=>c.id===inp.dataset.cat);
-    if(cat && !cat.isInKind) directSum += Number(inp.value)||0;
+    if(cat && !cat.excludeFromIndirectBase) directSum += Number(inp.value)||0;
   });
   const target = document.querySelector(`${selector}[data-cat="${indirectCat.id}"]`);
   if(target) target.value = (directSum * (Number(rate)||0) / 100).toFixed(2);
@@ -1248,7 +1475,7 @@ function printBudgetReport(gid){
   const g = getGrant(gid); const expended = expendedByCategory(gid);
   const rows = g.categories.map(c=>{
     const bud = Number(g.budgeted[c.id]||0), exp = expended[c.id]||0;
-    return `<tr><td>${esc(c.name)}${c.isIndirect?' (Indirect)':c.isInKind?' (In-Kind)':''}</td><td style="text-align:right;">${fmtMoney(bud)}</td><td style="text-align:right;">${fmtMoney(exp)}</td><td style="text-align:right;">${fmtMoney(bud-exp)}</td></tr>`;
+    return `<tr><td>${esc(c.name)}${c.isIndirect?' (Indirect)':c.excludeFromIndirectBase?' (Excl. from indirect base)':''}</td><td style="text-align:right;">${fmtMoney(bud)}</td><td style="text-align:right;">${fmtMoney(exp)}</td><td style="text-align:right;">${fmtMoney(bud-exp)}</td></tr>`;
   }).join('');
   const totB = totalBudgeted(g), totE = totalExpended(gid);
   const hasIndirect = g.categories.some(c=>c.isIndirect);
@@ -1263,13 +1490,26 @@ function printBudgetReport(gid){
     const scsExpended = expendedByScsCategory(gid);
     const scsRows = g.scs.categories.map(c=>{
       const bud = Number(g.scs.budgeted[c.id]||0), exp = scsExpended[c.id]||0;
-      return `<tr><td>${esc(c.name)}${c.isIndirect?' (Indirect)':c.isInKind?' (In-Kind)':''}</td><td style="text-align:right;">${fmtMoney(bud)}</td><td style="text-align:right;">${fmtMoney(exp)}</td><td style="text-align:right;">${fmtMoney(bud-exp)}</td></tr>`;
+      return `<tr><td>${esc(c.name)}${c.isIndirect?' (Indirect)':c.excludeFromIndirectBase?' (Excl. from indirect base)':''}</td><td style="text-align:right;">${fmtMoney(bud)}</td><td style="text-align:right;">${fmtMoney(exp)}</td><td style="text-align:right;">${fmtMoney(bud-exp)}</td></tr>`;
     }).join('');
     const scsTotB = totalScsBudgeted(g), scsTotE = totalScsExpended(gid);
     scsSection = `<h3 style="margin-top:16px;font-size:13px;">SCS Budget</h3>
     <table class="inv-table" style="width:100%;">
       <thead><tr><th>Category</th><th style="text-align:right;">Budgeted</th><th style="text-align:right;">Expended</th><th style="text-align:right;">Remaining</th></tr></thead>
       <tbody>${scsRows}<tr><td><b>Total</b></td><td style="text-align:right;"><b>${fmtMoney(scsTotB)}</b></td><td style="text-align:right;"><b>${fmtMoney(scsTotE)}</b></td><td style="text-align:right;"><b>${fmtMoney(scsTotB-scsTotE)}</b></td></tr></tbody>
+    </table>`;
+  }
+  let inKindSection = '';
+  if(g.inKind && g.inKind.enabled){
+    const inKindRows = g.inKind.categories.map(c=>{
+      const bud = Number(g.inKind.budgeted[c.id]||0), con = Number((g.inKind.contributed||{})[c.id]||0);
+      return `<tr><td>${esc(c.name)}</td><td style="text-align:right;">${fmtMoney(bud)}</td><td style="text-align:right;">${fmtMoney(con)}</td><td style="text-align:right;">${fmtMoney(bud-con)}</td></tr>`;
+    }).join('');
+    const inKindTotB = totalInKindBudgeted(g), inKindTotC = totalInKindContributed(g);
+    inKindSection = `<h3 style="margin-top:16px;font-size:13px;">In-Kind (not included in totals above)</h3>
+    <table class="inv-table" style="width:100%;">
+      <thead><tr><th>Item</th><th style="text-align:right;">Budgeted</th><th style="text-align:right;">Contributed</th><th style="text-align:right;">Remaining</th></tr></thead>
+      <tbody>${inKindRows}<tr><td><b>Total</b></td><td style="text-align:right;"><b>${fmtMoney(inKindTotB)}</b></td><td style="text-align:right;"><b>${fmtMoney(inKindTotC)}</b></td><td style="text-align:right;"><b>${fmtMoney(inKindTotB-inKindTotC)}</b></td></tr></tbody>
     </table>`;
   }
   showPrintSheet(`
@@ -1281,6 +1521,7 @@ function printBudgetReport(gid){
       <tbody>${rows}${subtotalRows}</tbody>
     </table>
     ${scsSection}
+    ${inKindSection}
   `);
 }
 function printGrantsOverview(){
@@ -1351,6 +1592,13 @@ function exportGrantsExcel(){
         rows.push([c.name, bud, exp, bud-exp]);
       });
     }
+    if(g.inKind && g.inKind.enabled){
+      rows.push([],['In-Kind (not included in totals)'],['Item','Budgeted','Contributed','Remaining']);
+      g.inKind.categories.forEach(c=>{
+        const bud = Number(g.inKind.budgeted[c.id]||0), con = Number((g.inKind.contributed||{})[c.id]||0);
+        rows.push([c.name, bud, con, bud-con]);
+      });
+    }
     sheets.push({name: (g.agreementNumber || g.projectName || 'Grant'), rows});
   });
   downloadExcel('grants-overview.xlsx', sheets);
@@ -1374,6 +1622,15 @@ function exportBudgetExcel(gid){
     });
     const scsTotB = totalScsBudgeted(g), scsTotE = totalScsExpended(gid);
     rows.push(['Total', scsTotB, scsTotE, scsTotB-scsTotE]);
+  }
+  if(g.inKind && g.inKind.enabled){
+    rows.push([],['In-Kind (not included in totals)'],['Item','Budgeted','Contributed','Remaining']);
+    g.inKind.categories.forEach(c=>{
+      const bud = Number(g.inKind.budgeted[c.id]||0), con = Number((g.inKind.contributed||{})[c.id]||0);
+      rows.push([c.name, bud, con, bud-con]);
+    });
+    const ikTotB = totalInKindBudgeted(g), ikTotC = totalInKindContributed(g);
+    rows.push(['Total', ikTotB, ikTotC, ikTotB-ikTotC]);
   }
   downloadExcel(`budget-${(g.agreementNumber||g.id).replace(/[^a-z0-9-]/gi,'')}.xlsx`, [{name:'Budget', rows}]);
 }
