@@ -1126,7 +1126,7 @@ function renderBudgetTab(g, expended){
 function renderInvoicesTab(g){
   const invs = grantInvoices(g.id);
   const showScsCol = g.scs && g.scs.enabled;
-  return `<div class="page-head" style="margin-bottom:12px;"><div class="page-sub">Reimbursement requests submitted against this grant · Total excludes Indirect</div>
+  return `<div class="page-head" style="margin-bottom:12px;"><div class="page-sub">Reimbursement requests submitted against this grant</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
       <button class="btn-ghost btn" id="export-invoices-excel">Export (Excel)</button>
       <button class="btn" id="add-invoice-btn">+ Add invoice</button>
@@ -1387,8 +1387,8 @@ function modalInvoiceHTML(){
     ? `<p style="font-size:12px;color:var(--moss);margin:-4px 0 8px;">Indirect auto-calculates at ${g.indirectRate}% of direct costs as you type.</p>` : '';
   const scsRateNote = hasScs && (g.scs.indirectRate!==null && g.scs.indirectRate!==undefined && g.scs.indirectRate!=='' && g.scs.categories.some(c=>c.isIndirect))
     ? `<p style="font-size:12px;color:var(--moss);margin:-4px 0 8px;">SCS indirect auto-calculates at ${g.scs.indirectRate}% of direct costs as you type.</p>` : '';
-  const grantorTotalNow = g.categories.filter(c=>!c.isIndirect).reduce((s,c)=> s + Number(d.amounts[c.id]||0), 0);
-  const scsTotalNow = hasScs ? g.scs.categories.filter(c=>!c.isIndirect).reduce((s,c)=> s + Number((d.scsAmounts||{})[c.id]||0), 0) : 0;
+  const grantorTotalNow = g.categories.reduce((s,c)=> s + Number(d.amounts[c.id]||0), 0);
+  const scsTotalNow = hasScs ? g.scs.categories.reduce((s,c)=> s + Number((d.scsAmounts||{})[c.id]||0), 0) : 0;
   return `<div class="modal wide">
     <h3>${state.modal.invoiceId? 'Edit invoice':'Add invoice'} — ${esc(g.projectName)}</h3>
     <div class="row">
@@ -1401,13 +1401,16 @@ function modalInvoiceHTML(){
     <table style="margin:0 0 4px;"><thead><tr><th>Category</th><th class="num">Amount</th></tr></thead>
     <tbody>${g.categories.map(c=>`<tr><td>${esc(c.name)}${catBadge(c)}</td><td class="num"><input class="i-amt" data-cat="${c.id}" data-indirect="${c.isIndirect?'1':''}" type="number" step="0.01" style="width:120px;text-align:right;" value="${d.amounts[c.id]||0}"></td></tr>`).join('')}
     </tbody></table>
-    <div style="text-align:right;font-size:13px;font-weight:600;margin:0 0 10px;">Total (excl. Indirect): <span id="i-grantor-total-display">${fmtMoney(grantorTotalNow)}</span></div>
+    <div style="text-align:right;font-size:13px;font-weight:600;margin:0 0 10px;">Total: <span id="i-grantor-total-display">${fmtMoney(grantorTotalNow)}</span></div>
     ${hasScs?`<h3 style="font-size:13px;margin:14px 0 6px;">SCS amounts</h3>
     ${scsRateNote}
     <table style="margin:0 0 4px;"><thead><tr><th>Category</th><th class="num">Amount</th></tr></thead>
     <tbody>${g.scs.categories.map(c=>`<tr><td>${esc(c.name)}${catBadge(c)}</td><td class="num"><input class="i-scs-amt" data-cat="${c.id}" data-indirect="${c.isIndirect?'1':''}" type="number" step="0.01" style="width:120px;text-align:right;" value="${(d.scsAmounts||{})[c.id]||0}"></td></tr>`).join('')}
     </tbody></table>
-    <div style="text-align:right;font-size:13px;font-weight:600;margin:0 0 10px;">SCS Total (excl. Indirect): <span id="i-scs-total-display">${fmtMoney(scsTotalNow)}</span></div>`:''}
+    <div style="text-align:right;font-size:13px;font-weight:600;margin:0 0 10px;">SCS Total: <span id="i-scs-total-display">${fmtMoney(scsTotalNow)}</span></div>`:''}
+    ${g.inKind && g.inKind.enabled? `<div class="card" style="background:var(--sage);border:none;padding:10px 14px;margin:0 0 14px;">
+      <span style="font-size:12.5px;color:var(--forest-dark);">In-Kind to date (informational — not part of this invoice's totals): <b>${fmtMoney(totalInKindContributed(g))}</b></span>
+    </div>` : ''}
     <div class="row">
       <div class="field"><label>Sent date</label><input id="i-sent" type="date" value="${d.sentDate}"></div>
       <div class="field"><label>Payment received date</label><input id="i-recv" type="date" value="${d.receivedDate}"></div>
@@ -1451,18 +1454,12 @@ function recalcIndirectLine(selector, categories, rate){
 }
 function updateInvoiceTotalDisplays(g){
   let grantorTotal = 0;
-  document.querySelectorAll('.i-amt').forEach(inp=>{
-    const cat = g.categories.find(c=>c.id===inp.dataset.cat);
-    if(!(cat && cat.isIndirect)) grantorTotal += Number(inp.value)||0;
-  });
+  document.querySelectorAll('.i-amt').forEach(inp=> grantorTotal += Number(inp.value)||0);
   const gd = document.getElementById('i-grantor-total-display');
   if(gd) gd.textContent = fmtMoney(grantorTotal);
   if(g.scs && g.scs.enabled){
     let scsTotal = 0;
-    document.querySelectorAll('.i-scs-amt').forEach(inp=>{
-      const cat = g.scs.categories.find(c=>c.id===inp.dataset.cat);
-      if(!(cat && cat.isIndirect)) scsTotal += Number(inp.value)||0;
-    });
+    document.querySelectorAll('.i-scs-amt').forEach(inp=> scsTotal += Number(inp.value)||0);
     const sd = document.getElementById('i-scs-total-display');
     if(sd) sd.textContent = fmtMoney(scsTotal);
   }
@@ -1577,8 +1574,7 @@ function attachInvoiceModalEvents(){
     document.querySelectorAll('.i-amt').forEach(inp=>{
       const val = Number(inp.value)||0;
       d.amounts[inp.dataset.cat] = val;
-      const cat = g.categories.find(c=>c.id===inp.dataset.cat);
-      if(!(cat && cat.isIndirect)) total += val;
+      total += val;
     });
     d.total = total;
     d.scsAmounts = d.scsAmounts || {};
@@ -1586,8 +1582,7 @@ function attachInvoiceModalEvents(){
     document.querySelectorAll('.i-scs-amt').forEach(inp=>{
       const val = Number(inp.value)||0;
       d.scsAmounts[inp.dataset.cat] = val;
-      const cat = g.scs.categories.find(c=>c.id===inp.dataset.cat);
-      if(!(cat && cat.isIndirect)) scsTotal += val;
+      scsTotal += val;
     });
     d.scsTotal = scsTotal;
     const ok = await saveInvoiceRow(d);
@@ -1627,11 +1622,14 @@ function printInvoice(invoiceId){
     </table>
     <table class="inv-table" style="width:100%;">
       <thead><tr><th colspan="2">Grantor Share</th></tr></thead>
-      <tbody>${rows}<tr><td><b>Total requested (excl. Indirect)</b></td><td style="text-align:right;"><b>${fmtMoney(inv.total)}</b></td></tr></tbody>
+      <tbody>${rows}<tr><td><b>Total requested</b></td><td style="text-align:right;"><b>${fmtMoney(inv.total)}</b></td></tr></tbody>
     </table>
     ${hasScs? `<table class="inv-table" style="width:100%;">
       <thead><tr><th colspan="2">SCS amounts</th></tr></thead>
-      <tbody>${scsRows}<tr><td><b>SCS total (excl. Indirect)</b></td><td style="text-align:right;"><b>${fmtMoney(inv.scsTotal||0)}</b></td></tr></tbody>
+      <tbody>${scsRows}<tr><td><b>SCS total</b></td><td style="text-align:right;"><b>${fmtMoney(inv.scsTotal||0)}</b></td></tr></tbody>
+    </table>` : ''}
+    ${g.inKind && g.inKind.enabled? `<table class="inv-table" style="width:100%;">
+      <tbody><tr><td>In-Kind to date (informational — not part of this invoice's totals)</td><td style="text-align:right;">${fmtMoney(totalInKindContributed(g))}</td></tr></tbody>
     </table>` : ''}
     ${inv.signatureData? `<img src="${inv.signatureData}" style="max-width:260px;max-height:80px;display:block;margin-top:20px;">` : ''}
     <div class="sig-line">Signature of Authorized Certifying Official${inv.signatureDate? ' — '+fmtDate(inv.signatureDate) : ' / Date'}</div>
@@ -1722,7 +1720,7 @@ function printReimbursementReport(){
     const total = items.reduce((s,i)=>s+i.amount,0);
     const indirect = items.reduce((s,i)=>s+i.indirectAmt,0);
     const rows = items.map(i=> `<tr><td>${esc(i.name)}</td><td>${esc(i.invoiceNumber)}</td><td style="text-align:right;">${fmtMoney(i.amount)}</td><td style="text-align:right;">${fmtMoney(i.indirectAmt)}</td><td>${fmtDate(i.sentDate)}</td><td>${i.receivedDate? fmtDate(i.receivedDate):'pending'}</td></tr>`).join('');
-    return `<h3 style="margin-top:18px;font-size:13px;">${esc(label)} — ${fmtMoney(total)} requested (excl. indirect), ${fmtMoney(indirect)} indirect</h3>
+    return `<h3 style="margin-top:18px;font-size:13px;">${esc(label)} — ${fmtMoney(total)} requested (${fmtMoney(indirect)} of that is indirect)</h3>
       <table class="inv-table" style="width:100%;"><thead><tr><th>Grant / Billed to</th><th>Inv #</th><th style="text-align:right;">Total</th><th style="text-align:right;">Indirect</th><th>Sent</th><th>Received</th></tr></thead><tbody>${rows}</tbody></table>`;
   }).join('');
   showPrintSheet(`<div class="inv-header"><h2>Reimbursement/Invoice Report</h2><div>${esc(state.orgSettings.orgName)}</div><div>${new Date().toLocaleDateString()}</div></div>${body || '<p>No invoices recorded yet.</p>'}`);
@@ -1807,8 +1805,8 @@ function exportInvoicesExcel(gid){
   const g = getGrant(gid); if(!g) return;
   const invs = grantInvoices(gid);
   const hasScs = g.scs && g.scs.enabled;
-  const header = ['Invoice #','Period From','Period To', ...g.categories.map(c=>c.name), 'Total (excl. Indirect)',
-    ...(hasScs? g.scs.categories.map(c=>'SCS: '+c.name) : []), ...(hasScs? ['SCS Total (excl. Indirect)'] : []),
+  const header = ['Invoice #','Period From','Period To', ...g.categories.map(c=>c.name), 'Total',
+    ...(hasScs? g.scs.categories.map(c=>'SCS: '+c.name) : []), ...(hasScs? ['SCS Total'] : []),
     'Sent Date','Received Date'];
   const rows = [header];
   invs.forEach(inv=>{
@@ -1824,7 +1822,7 @@ function exportInvoicesExcel(gid){
 }
 function exportReimbursementsExcel(){
   const fy = state.orgSettings.fyStartMonth||10;
-  const rows = [['Quarter','Type','Grant / Billed to','Class #','Agreement #','Invoice #','Total (excl. Indirect)','Indirect','Sent Date','Received Date']];
+  const rows = [['Quarter','Type','Grant / Billed to','Class #','Agreement #','Invoice #','Total','Indirect','Sent Date','Received Date']];
   state.invoices.forEach(inv=>{
     const g = getGrant(inv.grantId);
     const label = quarterLabel(inv.sentDate || inv.periodTo, fy);
@@ -1890,7 +1888,7 @@ function renderReimbursements(){
     const db = groups[b].map(x=>x.sentDate).filter(Boolean).sort().pop() || '';
     return new Date(db) - new Date(da);
   });
-  return `<div class="page-head"><div><h2>Reimbursements/Invoices</h2><div class="page-sub">Grant invoices and standalone invoices, grouped by quarter · fiscal year starts month ${fy} · Total excludes Indirect</div></div>
+  return `<div class="page-head"><div><h2>Reimbursements/Invoices</h2><div class="page-sub">Grant invoices and standalone invoices, grouped by quarter · fiscal year starts month ${fy}</div></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
       <button class="btn-ghost btn" id="export-reimb-excel">Export (Excel)</button>
       <button class="btn-ghost btn" id="export-reimb-pdf">Export (PDF)</button>
@@ -1905,7 +1903,7 @@ function renderReimbursements(){
       <h4>${label}</h4>
       <div style="display:flex;gap:24px;flex-wrap:wrap;margin:4px 0 14px;font-size:13px;">
         <div><span style="color:var(--moss);">Total amount submitted</span><br><b>${fmtMoney(total)}</b></div>
-        <div><span style="color:var(--moss);">Direct costs requested</span><br><b>${fmtMoney(total)}</b></div>
+        <div><span style="color:var(--moss);">Direct costs requested</span><br><b>${fmtMoney(total-indirect)}</b></div>
         <div><span style="color:var(--moss);">Received</span><br><b>${fmtMoney(received)}</b></div>
         <div style="margin-left:auto;text-align:right;"><span style="color:var(--moss);">Indirect costs requested</span><br><b>${fmtMoney(indirect)}</b></div>
       </div>
