@@ -352,6 +352,14 @@ async function init(){
 /* ============ DERIVED HELPERS ============ */
 function getGrant(id){ return state.grants.find(g=>g.id===id); }
 function grantInvoices(gid){ return state.invoices.filter(i=>i.grantId===gid).sort((a,b)=> (a.invoiceNumber||0)-(b.invoiceNumber||0)); }
+function invoiceIndirectAmount(inv, categories){
+  const indirectCat = (categories||[]).find(c=>c.isIndirect);
+  return indirectCat ? Number((inv.amounts||{})[indirectCat.id]||0) : 0;
+}
+function invoiceScsIndirectAmount(inv, scsCategories){
+  const indirectCat = (scsCategories||[]).find(c=>c.isIndirect);
+  return indirectCat ? Number((inv.scsAmounts||{})[indirectCat.id]||0) : 0;
+}
 function expendedByCategory(gid){
   const g = getGrant(gid); if(!g) return {};
   if(g.trackingMode==='lumpsum'){
@@ -1118,18 +1126,19 @@ function renderBudgetTab(g, expended){
 function renderInvoicesTab(g){
   const invs = grantInvoices(g.id);
   const showScsCol = g.scs && g.scs.enabled;
-  return `<div class="page-head" style="margin-bottom:12px;"><div class="page-sub">Reimbursement requests submitted against this grant</div>
+  return `<div class="page-head" style="margin-bottom:12px;"><div class="page-sub">Reimbursement requests submitted against this grant · Total excludes Indirect</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
       <button class="btn-ghost btn" id="export-invoices-excel">Export (Excel)</button>
       <button class="btn" id="add-invoice-btn">+ Add invoice</button>
     </div></div>
   <div class="card">
-    ${invs.length? `<table><thead><tr><th>Inv. #</th><th>Period</th><th class="num">Grantor Total</th>${showScsCol?'<th class="num">SCS Total</th>':''}<th>Sent</th><th>Received</th><th></th></tr></thead>
+    ${invs.length? `<table><thead><tr><th>Inv. #</th><th>Period</th><th class="num">Total</th><th class="num">Indirect</th>${showScsCol?'<th class="num">SCS Total</th><th class="num">SCS Indirect</th>':''}<th>Sent</th><th>Received</th><th></th></tr></thead>
     <tbody>${invs.map(inv=>`<tr>
       <td class="mono">${esc(inv.invoiceNumber)}</td>
       <td>${fmtDate(inv.periodFrom)} – ${fmtDate(inv.periodTo)}</td>
       <td class="num">${fmtMoney(inv.total)}</td>
-      ${showScsCol?`<td class="num">${fmtMoney(inv.scsTotal||0)}</td>`:''}
+      <td class="num">${fmtMoney(invoiceIndirectAmount(inv, g.categories))}</td>
+      ${showScsCol?`<td class="num">${fmtMoney(inv.scsTotal||0)}</td><td class="num">${fmtMoney(invoiceScsIndirectAmount(inv, g.scs.categories))}</td>`:''}
       <td>${fmtDate(inv.sentDate)}</td>
       <td>${inv.receivedDate? fmtDate(inv.receivedDate) : '<span style="color:var(--brass);">pending</span>'}</td>
       <td><button class="link-btn" data-print="${inv.id}">Print</button> · <button class="link-btn" data-edit-inv="${inv.id}">Edit</button></td>
@@ -1378,8 +1387,8 @@ function modalInvoiceHTML(){
     ? `<p style="font-size:12px;color:var(--moss);margin:-4px 0 8px;">Indirect auto-calculates at ${g.indirectRate}% of direct costs as you type.</p>` : '';
   const scsRateNote = hasScs && (g.scs.indirectRate!==null && g.scs.indirectRate!==undefined && g.scs.indirectRate!=='' && g.scs.categories.some(c=>c.isIndirect))
     ? `<p style="font-size:12px;color:var(--moss);margin:-4px 0 8px;">SCS indirect auto-calculates at ${g.scs.indirectRate}% of direct costs as you type.</p>` : '';
-  const grantorTotalNow = g.categories.reduce((s,c)=> s + Number(d.amounts[c.id]||0), 0);
-  const scsTotalNow = hasScs ? g.scs.categories.reduce((s,c)=> s + Number((d.scsAmounts||{})[c.id]||0), 0) : 0;
+  const grantorTotalNow = g.categories.filter(c=>!c.isIndirect).reduce((s,c)=> s + Number(d.amounts[c.id]||0), 0);
+  const scsTotalNow = hasScs ? g.scs.categories.filter(c=>!c.isIndirect).reduce((s,c)=> s + Number((d.scsAmounts||{})[c.id]||0), 0) : 0;
   return `<div class="modal wide">
     <h3>${state.modal.invoiceId? 'Edit invoice':'Add invoice'} — ${esc(g.projectName)}</h3>
     <div class="row">
@@ -1392,13 +1401,13 @@ function modalInvoiceHTML(){
     <table style="margin:0 0 4px;"><thead><tr><th>Category</th><th class="num">Amount</th></tr></thead>
     <tbody>${g.categories.map(c=>`<tr><td>${esc(c.name)}${catBadge(c)}</td><td class="num"><input class="i-amt" data-cat="${c.id}" data-indirect="${c.isIndirect?'1':''}" type="number" step="0.01" style="width:120px;text-align:right;" value="${d.amounts[c.id]||0}"></td></tr>`).join('')}
     </tbody></table>
-    <div style="text-align:right;font-size:13px;font-weight:600;margin:0 0 10px;">Total: <span id="i-grantor-total-display">${fmtMoney(grantorTotalNow)}</span></div>
+    <div style="text-align:right;font-size:13px;font-weight:600;margin:0 0 10px;">Total (excl. Indirect): <span id="i-grantor-total-display">${fmtMoney(grantorTotalNow)}</span></div>
     ${hasScs?`<h3 style="font-size:13px;margin:14px 0 6px;">SCS amounts</h3>
     ${scsRateNote}
     <table style="margin:0 0 4px;"><thead><tr><th>Category</th><th class="num">Amount</th></tr></thead>
     <tbody>${g.scs.categories.map(c=>`<tr><td>${esc(c.name)}${catBadge(c)}</td><td class="num"><input class="i-scs-amt" data-cat="${c.id}" data-indirect="${c.isIndirect?'1':''}" type="number" step="0.01" style="width:120px;text-align:right;" value="${(d.scsAmounts||{})[c.id]||0}"></td></tr>`).join('')}
     </tbody></table>
-    <div style="text-align:right;font-size:13px;font-weight:600;margin:0 0 10px;">SCS Total: <span id="i-scs-total-display">${fmtMoney(scsTotalNow)}</span></div>`:''}
+    <div style="text-align:right;font-size:13px;font-weight:600;margin:0 0 10px;">SCS Total (excl. Indirect): <span id="i-scs-total-display">${fmtMoney(scsTotalNow)}</span></div>`:''}
     <div class="row">
       <div class="field"><label>Sent date</label><input id="i-sent" type="date" value="${d.sentDate}"></div>
       <div class="field"><label>Payment received date</label><input id="i-recv" type="date" value="${d.receivedDate}"></div>
@@ -1442,17 +1451,25 @@ function recalcIndirectLine(selector, categories, rate){
 }
 function updateInvoiceTotalDisplays(g){
   let grantorTotal = 0;
-  document.querySelectorAll('.i-amt').forEach(inp=> grantorTotal += Number(inp.value)||0);
+  document.querySelectorAll('.i-amt').forEach(inp=>{
+    const cat = g.categories.find(c=>c.id===inp.dataset.cat);
+    if(!(cat && cat.isIndirect)) grantorTotal += Number(inp.value)||0;
+  });
   const gd = document.getElementById('i-grantor-total-display');
   if(gd) gd.textContent = fmtMoney(grantorTotal);
   if(g.scs && g.scs.enabled){
     let scsTotal = 0;
-    document.querySelectorAll('.i-scs-amt').forEach(inp=> scsTotal += Number(inp.value)||0);
+    document.querySelectorAll('.i-scs-amt').forEach(inp=>{
+      const cat = g.scs.categories.find(c=>c.id===inp.dataset.cat);
+      if(!(cat && cat.isIndirect)) scsTotal += Number(inp.value)||0;
+    });
     const sd = document.getElementById('i-scs-total-display');
     if(sd) sd.textContent = fmtMoney(scsTotal);
   }
 }
+let signatureUploadPending = false;
 function setupSignaturePad(existingDataUrl){
+  signatureUploadPending = false;
   const canvas = document.getElementById('i-sig-canvas');
   if(!canvas) return;
   const ctx = canvas.getContext('2d');
@@ -1494,10 +1511,24 @@ function setupSignaturePad(existingDataUrl){
   document.getElementById('i-sig-clear').onclick = ()=> ctx.clearRect(0,0,canvas.width,canvas.height);
   document.getElementById('i-sig-upload').onchange = (e)=>{
     const file = e.target.files[0]; if(!file) return;
+    signatureUploadPending = true;
+    const saveBtn = document.getElementById('modal-save-inv');
+    const originalLabel = saveBtn ? saveBtn.textContent : '';
+    if(saveBtn){ saveBtn.disabled = true; saveBtn.textContent = 'Loading signature…'; }
     const reader = new FileReader();
     reader.onload = (ev)=>{
       const img = new Image();
-      img.onload = ()=>{ ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(img, 0, 0, rect.width, 130); };
+      img.onload = ()=>{
+        ctx.clearRect(0,0,canvas.width,canvas.height);
+        ctx.drawImage(img, 0, 0, rect.width, 130);
+        signatureUploadPending = false;
+        if(saveBtn){ saveBtn.disabled = false; saveBtn.textContent = originalLabel || 'Save invoice'; }
+      };
+      img.onerror = ()=>{
+        signatureUploadPending = false;
+        if(saveBtn){ saveBtn.disabled = false; saveBtn.textContent = originalLabel || 'Save invoice'; }
+        alert('Could not load that image.');
+      };
       img.src = ev.target.result;
     };
     reader.readAsDataURL(file);
@@ -1529,6 +1560,7 @@ function attachInvoiceModalEvents(){
     state.modal=null; render();
   };
   document.getElementById('modal-save-inv').onclick = async ()=>{
+    if(signatureUploadPending){ alert('Signature image is still loading — try again in a second.'); return; }
     const d = state.modal.draft;
     d.invoiceNumber = Number(document.getElementById('i-num').value)||d.invoiceNumber;
     d.periodFrom = document.getElementById('i-from').value;
@@ -1545,7 +1577,8 @@ function attachInvoiceModalEvents(){
     document.querySelectorAll('.i-amt').forEach(inp=>{
       const val = Number(inp.value)||0;
       d.amounts[inp.dataset.cat] = val;
-      total += val;
+      const cat = g.categories.find(c=>c.id===inp.dataset.cat);
+      if(!(cat && cat.isIndirect)) total += val;
     });
     d.total = total;
     d.scsAmounts = d.scsAmounts || {};
@@ -1553,7 +1586,8 @@ function attachInvoiceModalEvents(){
     document.querySelectorAll('.i-scs-amt').forEach(inp=>{
       const val = Number(inp.value)||0;
       d.scsAmounts[inp.dataset.cat] = val;
-      scsTotal += val;
+      const cat = g.scs.categories.find(c=>c.id===inp.dataset.cat);
+      if(!(cat && cat.isIndirect)) scsTotal += val;
     });
     d.scsTotal = scsTotal;
     const ok = await saveInvoiceRow(d);
@@ -1593,11 +1627,11 @@ function printInvoice(invoiceId){
     </table>
     <table class="inv-table" style="width:100%;">
       <thead><tr><th colspan="2">Grantor Share</th></tr></thead>
-      <tbody>${rows}<tr><td><b>Total requested</b></td><td style="text-align:right;"><b>${fmtMoney(inv.total)}</b></td></tr></tbody>
+      <tbody>${rows}<tr><td><b>Total requested (excl. Indirect)</b></td><td style="text-align:right;"><b>${fmtMoney(inv.total)}</b></td></tr></tbody>
     </table>
     ${hasScs? `<table class="inv-table" style="width:100%;">
       <thead><tr><th colspan="2">SCS amounts</th></tr></thead>
-      <tbody>${scsRows}<tr><td><b>SCS total</b></td><td style="text-align:right;"><b>${fmtMoney(inv.scsTotal||0)}</b></td></tr></tbody>
+      <tbody>${scsRows}<tr><td><b>SCS total (excl. Indirect)</b></td><td style="text-align:right;"><b>${fmtMoney(inv.scsTotal||0)}</b></td></tr></tbody>
     </table>` : ''}
     ${inv.signatureData? `<img src="${inv.signatureData}" style="max-width:260px;max-height:80px;display:block;margin-top:20px;">` : ''}
     <div class="sig-line">Signature of Authorized Certifying Official${inv.signatureDate? ' — '+fmtDate(inv.signatureDate) : ' / Date'}</div>
@@ -1676,18 +1710,20 @@ function printReimbursementReport(){
   state.invoices.forEach(inv=>{
     const label = quarterLabel(inv.sentDate || inv.periodTo, fy);
     const g = getGrant(inv.grantId);
-    (groups[label]=groups[label]||[]).push({name: g? g.funderName+' — '+g.projectName : 'Unknown', invoiceNumber: inv.invoiceNumber, amount: inv.total, sentDate: inv.sentDate, receivedDate: inv.receivedDate});
+    const indirectAmt = g ? invoiceIndirectAmount(inv, g.categories) : 0;
+    (groups[label]=groups[label]||[]).push({name: g? g.funderName+' — '+g.projectName+(g.classNumber?' (Class '+g.classNumber+')':'') : 'Unknown', invoiceNumber: inv.invoiceNumber, amount: inv.total, indirectAmt, sentDate: inv.sentDate, receivedDate: inv.receivedDate});
   });
   state.standaloneInvoices.forEach(s=>{
     const label = quarterLabel(s.sentDate, fy);
-    (groups[label]=groups[label]||[]).push({name: (s.billedTo||'Standalone')+' (standalone)', invoiceNumber: s.invoiceNumber, amount: s.amount, sentDate: s.sentDate, receivedDate: s.receivedDate});
+    (groups[label]=groups[label]||[]).push({name: (s.billedTo||'Standalone')+' (standalone)', invoiceNumber: s.invoiceNumber, amount: s.amount, indirectAmt:0, sentDate: s.sentDate, receivedDate: s.receivedDate});
   });
   const body = Object.keys(groups).map(label=>{
     const items = groups[label];
     const total = items.reduce((s,i)=>s+i.amount,0);
-    const rows = items.map(i=> `<tr><td>${esc(i.name)}</td><td>${esc(i.invoiceNumber)}</td><td style="text-align:right;">${fmtMoney(i.amount)}</td><td>${fmtDate(i.sentDate)}</td><td>${i.receivedDate? fmtDate(i.receivedDate):'pending'}</td></tr>`).join('');
-    return `<h3 style="margin-top:18px;font-size:13px;">${esc(label)} — ${fmtMoney(total)} requested</h3>
-      <table class="inv-table" style="width:100%;"><thead><tr><th>Grant / Billed to</th><th>Inv #</th><th style="text-align:right;">Amount</th><th>Sent</th><th>Received</th></tr></thead><tbody>${rows}</tbody></table>`;
+    const indirect = items.reduce((s,i)=>s+i.indirectAmt,0);
+    const rows = items.map(i=> `<tr><td>${esc(i.name)}</td><td>${esc(i.invoiceNumber)}</td><td style="text-align:right;">${fmtMoney(i.amount)}</td><td style="text-align:right;">${fmtMoney(i.indirectAmt)}</td><td>${fmtDate(i.sentDate)}</td><td>${i.receivedDate? fmtDate(i.receivedDate):'pending'}</td></tr>`).join('');
+    return `<h3 style="margin-top:18px;font-size:13px;">${esc(label)} — ${fmtMoney(total)} requested (excl. indirect), ${fmtMoney(indirect)} indirect</h3>
+      <table class="inv-table" style="width:100%;"><thead><tr><th>Grant / Billed to</th><th>Inv #</th><th style="text-align:right;">Total</th><th style="text-align:right;">Indirect</th><th>Sent</th><th>Received</th></tr></thead><tbody>${rows}</tbody></table>`;
   }).join('');
   showPrintSheet(`<div class="inv-header"><h2>Reimbursement/Invoice Report</h2><div>${esc(state.orgSettings.orgName)}</div><div>${new Date().toLocaleDateString()}</div></div>${body || '<p>No invoices recorded yet.</p>'}`);
 }
@@ -1771,8 +1807,8 @@ function exportInvoicesExcel(gid){
   const g = getGrant(gid); if(!g) return;
   const invs = grantInvoices(gid);
   const hasScs = g.scs && g.scs.enabled;
-  const header = ['Invoice #','Period From','Period To', ...g.categories.map(c=>c.name), 'Grantor Total',
-    ...(hasScs? g.scs.categories.map(c=>'SCS: '+c.name) : []), ...(hasScs? ['SCS Total'] : []),
+  const header = ['Invoice #','Period From','Period To', ...g.categories.map(c=>c.name), 'Total (excl. Indirect)',
+    ...(hasScs? g.scs.categories.map(c=>'SCS: '+c.name) : []), ...(hasScs? ['SCS Total (excl. Indirect)'] : []),
     'Sent Date','Received Date'];
   const rows = [header];
   invs.forEach(inv=>{
@@ -1788,15 +1824,16 @@ function exportInvoicesExcel(gid){
 }
 function exportReimbursementsExcel(){
   const fy = state.orgSettings.fyStartMonth||10;
-  const rows = [['Quarter','Type','Grant / Billed to','Agreement #','Invoice #','Amount','Sent Date','Received Date']];
+  const rows = [['Quarter','Type','Grant / Billed to','Class #','Agreement #','Invoice #','Total (excl. Indirect)','Indirect','Sent Date','Received Date']];
   state.invoices.forEach(inv=>{
     const g = getGrant(inv.grantId);
     const label = quarterLabel(inv.sentDate || inv.periodTo, fy);
-    rows.push([label, 'Grant', g? g.funderName+' — '+g.projectName : 'Unknown', g? g.agreementNumber:'', inv.invoiceNumber, inv.total, inv.sentDate, inv.receivedDate]);
+    const indirectAmt = g ? invoiceIndirectAmount(inv, g.categories) : 0;
+    rows.push([label, 'Grant', g? g.funderName+' — '+g.projectName : 'Unknown', g? g.classNumber:'', g? g.agreementNumber:'', inv.invoiceNumber, inv.total, indirectAmt, inv.sentDate, inv.receivedDate]);
   });
   state.standaloneInvoices.forEach(s=>{
     const label = quarterLabel(s.sentDate, fy);
-    rows.push([label, 'Standalone', s.billedTo||'', '', s.invoiceNumber, s.amount, s.sentDate, s.receivedDate]);
+    rows.push([label, 'Standalone', s.billedTo||'', '', '', s.invoiceNumber, s.amount, 0, s.sentDate, s.receivedDate]);
   });
   downloadExcel('reimbursements-invoices.xlsx', [{name:'Reimbursements-Invoices', rows}]);
 }
@@ -1833,26 +1870,27 @@ function renderReimbursements(){
     const label = quarterLabel(inv.sentDate || inv.periodTo, fy);
     if(!groups[label]) groups[label]=[];
     const g = getGrant(inv.grantId);
-    let directAmt = 0, indirectAmt = 0;
-    if(g){
-      g.categories.forEach(c=>{
-        const amt = Number(inv.amounts[c.id]||0);
-        if(c.isIndirect) indirectAmt += amt; else directAmt += amt;
-      });
-    }
-    groups[label].push({kind:'grant', id:inv.id, name: g? `${g.funderName} — ${g.projectName}`:'Unknown grant', sub: g? g.agreementNumber:'', invoiceNumber: inv.invoiceNumber, amount: inv.total, directAmt, indirectAmt, sentDate: inv.sentDate, receivedDate: inv.receivedDate});
+    const indirectAmt = g ? invoiceIndirectAmount(inv, g.categories) : 0;
+    groups[label].push({
+      kind:'grant', id:inv.id,
+      name: g? `${g.funderName} — ${g.projectName}`:'Unknown grant',
+      classNumber: g? g.classNumber : '',
+      sub: g? g.agreementNumber:'',
+      invoiceNumber: inv.invoiceNumber, amount: inv.total, indirectAmt,
+      sentDate: inv.sentDate, receivedDate: inv.receivedDate
+    });
   });
   state.standaloneInvoices.forEach(s=>{
     const label = quarterLabel(s.sentDate, fy);
     if(!groups[label]) groups[label]=[];
-    groups[label].push({kind:'standalone', id:s.id, name: s.billedTo || 'Standalone invoice', sub: s.description||'', invoiceNumber: s.invoiceNumber, amount: s.amount, directAmt:0, indirectAmt:0, sentDate: s.sentDate, receivedDate: s.receivedDate});
+    groups[label].push({kind:'standalone', id:s.id, name: s.billedTo || 'Standalone invoice', classNumber:'', sub: s.description||'', invoiceNumber: s.invoiceNumber, amount: s.amount, indirectAmt:0, sentDate: s.sentDate, receivedDate: s.receivedDate});
   });
   const labels = Object.keys(groups).sort((a,b)=>{
     const da = groups[a].map(x=>x.sentDate).filter(Boolean).sort().pop() || '';
     const db = groups[b].map(x=>x.sentDate).filter(Boolean).sort().pop() || '';
     return new Date(db) - new Date(da);
   });
-  return `<div class="page-head"><div><h2>Reimbursements/Invoices</h2><div class="page-sub">Grant invoices and standalone invoices, grouped by quarter · fiscal year starts month ${fy}</div></div>
+  return `<div class="page-head"><div><h2>Reimbursements/Invoices</h2><div class="page-sub">Grant invoices and standalone invoices, grouped by quarter · fiscal year starts month ${fy} · Total excludes Indirect</div></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
       <button class="btn-ghost btn" id="export-reimb-excel">Export (Excel)</button>
       <button class="btn-ghost btn" id="export-reimb-pdf">Export (PDF)</button>
@@ -1861,19 +1899,18 @@ function renderReimbursements(){
   ${labels.length? labels.map(label=>{
     const items = groups[label];
     const total = items.reduce((s,i)=>s+i.amount,0);
-    const direct = items.reduce((s,i)=>s+i.directAmt,0);
     const indirect = items.reduce((s,i)=>s+i.indirectAmt,0);
     const received = items.filter(i=>i.receivedDate).reduce((s,i)=>s+i.amount,0);
     return `<div class="quarter-block card">
       <h4>${label}</h4>
       <div style="display:flex;gap:24px;flex-wrap:wrap;margin:4px 0 14px;font-size:13px;">
-        <div><span style="color:var(--moss);">Direct costs requested</span><br><b>${fmtMoney(direct)}</b></div>
-        <div><span style="color:var(--moss);">Indirect costs requested</span><br><b>${fmtMoney(indirect)}</b></div>
         <div><span style="color:var(--moss);">Total amount submitted</span><br><b>${fmtMoney(total)}</b></div>
+        <div><span style="color:var(--moss);">Direct costs requested</span><br><b>${fmtMoney(total)}</b></div>
         <div><span style="color:var(--moss);">Received</span><br><b>${fmtMoney(received)}</b></div>
+        <div style="margin-left:auto;text-align:right;"><span style="color:var(--moss);">Indirect costs requested</span><br><b>${fmtMoney(indirect)}</b></div>
       </div>
-      <table><thead><tr><th>Grant / Billed to</th><th>Inv. #</th><th class="num">Amount</th><th>Sent</th><th>Received</th><th></th></tr></thead>
-      <tbody>${items.map(i=>`<tr><td>${esc(i.name)}${i.sub?`<br><span class="mono" style="color:var(--moss);font-size:11px;">${esc(i.sub)}</span>`:''}${i.kind==='standalone'?'<span class="status-pill" style="margin-left:6px;background:var(--brass-light);color:#6B4A17;">Standalone</span>':''}</td><td class="mono">${esc(i.invoiceNumber)}</td><td class="num">${fmtMoney(i.amount)}</td><td>${fmtDate(i.sentDate)}</td><td>${i.receivedDate?fmtDate(i.receivedDate):'pending'}</td><td>${i.kind==='standalone'?`<button class="link-btn" data-print-standalone="${i.id}">Print</button> · <button class="link-btn" data-edit-standalone="${i.id}">Edit</button>`:''}</td></tr>`).join('')}</tbody></table>
+      <table><thead><tr><th>Grant / Billed to</th><th>Inv. #</th><th class="num">Total</th><th class="num">Indirect</th><th>Sent</th><th>Received</th><th></th></tr></thead>
+      <tbody>${items.map(i=>`<tr><td>${esc(i.name)}${i.classNumber?`<br><span style="color:var(--moss);font-size:11px;">Class ${esc(i.classNumber)}</span>`:''}${i.sub?`<br><span class="mono" style="color:var(--moss);font-size:11px;">${esc(i.sub)}</span>`:''}${i.kind==='standalone'?'<span class="status-pill" style="margin-left:6px;background:var(--brass-light);color:#6B4A17;">Standalone</span>':''}</td><td class="mono">${esc(i.invoiceNumber)}</td><td class="num">${fmtMoney(i.amount)}</td><td class="num">${fmtMoney(i.indirectAmt)}</td><td>${fmtDate(i.sentDate)}</td><td>${i.receivedDate?fmtDate(i.receivedDate):'pending'}</td><td>${i.kind==='standalone'?`<button class="link-btn" data-print-standalone="${i.id}">Print</button> · <button class="link-btn" data-edit-standalone="${i.id}">Edit</button>`:''}</td></tr>`).join('')}</tbody></table>
     </div>`;
   }).join('') : '<div class="empty">No invoices recorded yet.</div>'}
   `;
