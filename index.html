@@ -1620,6 +1620,7 @@ function printInvoice(invoiceId){
   const inv = state.invoices.find(i=>i.id===invoiceId);
   const g = getGrant(inv.grantId);
   const org = state.orgSettings;
+  const colgroup = '<colgroup><col style="width:60%;"><col style="width:40%;"></colgroup>';
   const rows = sortIndirectLast(g.categories).map(c=> `<tr><td>${esc(c.name)}</td><td style="text-align:right;">${fmtMoney(inv.amounts[c.id]||0)}</td></tr>`).join('');
   const hasScs = g.scs && g.scs.enabled;
   const scsRows = hasScs ? sortIndirectLast(g.scs.categories).map(c=> `<tr><td>${esc(c.name)}</td><td style="text-align:right;">${fmtMoney((inv.scsAmounts||{})[c.id]||0)}</td></tr>`).join('') : '';
@@ -1631,19 +1632,25 @@ function printInvoice(invoiceId){
       ${org.ein? `<div>EIN: ${esc(org.ein)}</div>`:''}
     </div>
     <table class="inv-table" style="width:100%;">
-      <tr><td><b>Funder</b></td><td>${esc(g.funderName)}</td><td><b>Agreement #</b></td><td>${esc(g.agreementNumber)}</td></tr>
-      <tr><td><b>Invoice #</b></td><td>${esc(inv.invoiceNumber)}</td><td><b>Period covered</b></td><td>${fmtDate(inv.periodFrom)} – ${fmtDate(inv.periodTo)}</td></tr>
+      ${colgroup}
+      <tr><td><b>Funder</b></td><td>${esc(g.funderName)}</td></tr>
+      <tr><td><b>Agreement #</b></td><td>${esc(g.agreementNumber)}</td></tr>
+      <tr><td><b>Invoice #</b></td><td>${esc(inv.invoiceNumber)}</td></tr>
+      <tr><td><b>Period covered</b></td><td>${fmtDate(inv.periodFrom)} – ${fmtDate(inv.periodTo)}</td></tr>
     </table>
     <table class="inv-table" style="width:100%;">
+      ${colgroup}
       <thead><tr><th colspan="2">Grantor Share</th></tr></thead>
       <tbody>${rows}<tr><td><b>Total requested</b></td><td style="text-align:right;"><b>${fmtMoney(inv.total)}</b></td></tr></tbody>
     </table>
     ${hasScs? `<table class="inv-table" style="width:100%;">
+      ${colgroup}
       <thead><tr><th colspan="2">SCS amounts</th></tr></thead>
       <tbody>${scsRows}<tr><td><b>SCS total</b></td><td style="text-align:right;"><b>${fmtMoney(inv.scsTotal||0)}</b></td></tr></tbody>
     </table>` : ''}
     ${g.inKind && g.inKind.enabled? `<table class="inv-table" style="width:100%;">
-      <tbody><tr><td>In-Kind to date (informational — not part of this invoice's totals)</td><td style="text-align:right;">${fmtMoney(totalInKindContributed(g))}</td></tr></tbody>
+      ${colgroup}
+      <tbody><tr><td>In-Kind to date</td><td style="text-align:right;">${fmtMoney(totalInKindContributed(g))}</td></tr></tbody>
     </table>` : ''}
     ${inv.notes? `<div style="margin-top:14px;font-size:11px;"><b>Notes:</b> ${esc(inv.notes).replace(/\n/g,'<br>')}</div>` : ''}
     ${inv.signatureData? `<img src="${inv.signatureData}" style="max-width:260px;max-height:80px;display:block;margin-top:20px;">` : ''}
@@ -1733,7 +1740,7 @@ function printReimbursementReport(){
   const fy = state.orgSettings.fyStartMonth||10;
   const groups = {};
   state.invoices.forEach(inv=>{
-    const label = quarterLabel(inv.sentDate || inv.periodTo, fy);
+    const label = quarterLabel(inv.periodTo || inv.sentDate, fy);
     const g = getGrant(inv.grantId);
     const indirectAmt = g ? invoiceIndirectAmount(inv, g.categories) : 0;
     (groups[label]=groups[label]||[]).push({name: g? g.funderName+' — '+g.projectName+(g.classNumber?' (Class '+g.classNumber+')':'') : 'Unknown', invoiceNumber: inv.invoiceNumber, amount: inv.total, indirectAmt, sentDate: inv.sentDate, receivedDate: inv.receivedDate});
@@ -1990,7 +1997,7 @@ function exportReimbursementsExcel(){
   const rows = [['Quarter','Type','Grant / Billed to','Class #','Agreement #','Invoice #','Total','Indirect','Sent Date','Received Date']];
   state.invoices.forEach(inv=>{
     const g = getGrant(inv.grantId);
-    const label = quarterLabel(inv.sentDate || inv.periodTo, fy);
+    const label = quarterLabel(inv.periodTo || inv.sentDate, fy);
     const indirectAmt = g ? invoiceIndirectAmount(inv, g.categories) : 0;
     rows.push([label, 'Grant', g? g.funderName+' — '+g.projectName : 'Unknown', g? g.classNumber:'', g? g.agreementNumber:'', inv.invoiceNumber, inv.total, indirectAmt, inv.sentDate, inv.receivedDate]);
   });
@@ -2030,7 +2037,7 @@ function renderReimbursements(){
   const fy = state.orgSettings.fyStartMonth||10;
   const groups = {};
   state.invoices.forEach(inv=>{
-    const label = quarterLabel(inv.sentDate || inv.periodTo, fy);
+    const label = quarterLabel(inv.periodTo || inv.sentDate, fy);
     if(!groups[label]) groups[label]=[];
     const g = getGrant(inv.grantId);
     const indirectAmt = g ? invoiceIndirectAmount(inv, g.categories) : 0;
@@ -2157,12 +2164,16 @@ function printStandaloneInvoice(id){
       ${org.ein? `<div>EIN: ${esc(org.ein)}</div>`:''}
     </div>
     <table class="inv-table" style="width:100%;">
-      <tr><td><b>Billed to</b></td><td>${esc(s.billedTo)}</td><td><b>Invoice #</b></td><td>${esc(s.invoiceNumber)}</td></tr>
-      <tr><td><b>Date</b></td><td>${fmtDate(s.sentDate)}</td><td><b>Amount</b></td><td>${fmtMoney(s.amount)}</td></tr>
+      <colgroup><col style="width:60%;"><col style="width:40%;"></colgroup>
+      <tr><td><b>Billed to</b></td><td>${esc(s.billedTo)}</td></tr>
+      <tr><td><b>Invoice #</b></td><td>${esc(s.invoiceNumber)}</td></tr>
+      <tr><td><b>Date</b></td><td>${fmtDate(s.sentDate)}</td></tr>
+      <tr><td><b>Amount</b></td><td style="text-align:right;">${fmtMoney(s.amount)}</td></tr>
     </table>
     <table class="inv-table" style="width:100%;">
-      <thead><tr><th>What it's for</th></tr></thead>
-      <tbody><tr><td>${esc(s.description)||'—'}</td></tr></tbody>
+      <colgroup><col style="width:60%;"><col style="width:40%;"></colgroup>
+      <thead><tr><th colspan="2">What it's for</th></tr></thead>
+      <tbody><tr><td colspan="2">${esc(s.description)||'—'}</td></tr></tbody>
     </table>
     ${s.notes? `<div style="margin-top:14px;font-size:11px;"><b>Notes:</b> ${esc(s.notes).replace(/\n/g,'<br>')}</div>` : ''}
     <div class="sig-line">Signature / Date</div>
