@@ -199,6 +199,7 @@ function rowToGrant(r){
     trackingMode: r.tracking_mode || 'invoiced',
     expended: r.expended || {},
     indirectRate: r.indirect_rate,
+    isFederal: !!r.is_federal,
     scs: Object.assign({enabled:false, categories:[], budgeted:{}, expended:{}, indirectRate:null}, r.scs || {}),
     inKind: Object.assign({enabled:false, categories:[], budgeted:{}, contributed:{}, entries:[]}, r.in_kind || {}),
     links: r.links || []
@@ -214,11 +215,18 @@ function grantToRow(g){
     tracking_mode: g.trackingMode || 'invoiced',
     expended: g.expended || {},
     indirect_rate: (g.indirectRate===''||g.indirectRate===undefined) ? null : g.indirectRate,
+    is_federal: !!g.isFederal,
     scs: g.scs || {enabled:false, categories:[], budgeted:{}, expended:{}, indirectRate:null},
     in_kind: g.inKind || {enabled:false, categories:[], budgeted:{}, contributed:{}, entries:[]},
     links: g.links || []
   };
 }
+function budgetSectionLabel(g){ return g.isFederal ? 'Federal Budget' : 'Grantor Budget'; }
+function shareLabel(g){ return g.isFederal ? 'Federal Share' : 'Grantor Share'; }
+function nonFederalLabel(g){ return g.isFederal ? 'Non-Federal Share' : 'SCS Budget'; }
+function nonFederalShortLabel(g){ return g.isFederal ? 'Non-Federal' : 'SCS'; }
+function funderFieldLabel(g){ return g.isFederal ? 'Federal Sponsoring Agency' : 'Funder'; }
+function totalRequestedLabel(g){ return g.isFederal ? 'Federal Share Now Requested' : 'Total requested'; }
 function rowToInvoice(r){
   return {
     id: r.id, grantId: r.grant_id, invoiceNumber: r.invoice_number,
@@ -738,7 +746,7 @@ function openGrantModal(grantId){
     startDate:'', endDate:'', status:'Active', notes:'',
     categories:[{id:uid(),name:'Salary/Labor'},{id:uid(),name:'Travel'},{id:uid(),name:'Supplies/Materials'},{id:uid(),name:'Indirect',isIndirect:true}],
     budgeted:{}, reporting:{performanceFrequency:'',performanceLastSubmitted:'',performanceNextDue:'',financialFrequency:'',financialLastSubmitted:'',financialNextDue:''},
-    trackingMode:'invoiced', expended:{}, indirectRate:'',
+    trackingMode:'invoiced', expended:{}, indirectRate:'', isFederal:false,
     scs:{enabled:false, categories:[], budgeted:{}, expended:{}, indirectRate:''},
     inKind:{enabled:false, categories:[], budgeted:{}, contributed:{}, entries:[]},
     links:[]
@@ -792,6 +800,7 @@ function modalGrantHTML(){
       <div class="field"><label>Start date</label><input id="g-start" type="date" value="${d.startDate||''}"></div>
       <div class="field"><label>End date</label><input id="g-end" type="date" value="${d.endDate||''}"></div>
     </div>
+    <div class="toggle-row"><input type="checkbox" id="g-is-federal" ${d.isFederal?'checked':''}> <label for="g-is-federal">This is a federal grant (uses "Federal Sponsoring Agency" / "Federal Share" / "Non-Federal Share" wording instead of "Grantor"/"SCS")</label></div>
     <div class="field"><label>How is spending tracked?</label>
       <select id="g-tracking">
         <option value="invoiced" ${d.trackingMode!=='lumpsum'?'selected':''}>Invoiced — Expended is calculated from invoices</option>
@@ -889,6 +898,7 @@ function syncGrantDraftFromDOM(){
   if(g('g-start')) d.startDate = g('g-start').value;
   if(g('g-end')) d.endDate = g('g-end').value;
   if(g('g-tracking')) d.trackingMode = g('g-tracking').value;
+  if(g('g-is-federal')) d.isFederal = g('g-is-federal').checked;
   if(g('g-indirect-rate')) d.indirectRate = g('g-indirect-rate').value===''? '' : Number(g('g-indirect-rate').value);
   if(g('g-scs-indirect-rate')) d.scs.indirectRate = g('g-scs-indirect-rate').value===''? '' : Number(g('g-scs-indirect-rate').value);
   if(g('g-notes')) d.notes = g('g-notes').value;
@@ -1087,7 +1097,7 @@ function renderBudgetTab(g, expended){
       <tr class="total-row"><td>Indirect Cost</td><td class="num">${fmtMoney(sIndBud)}</td><td class="num">${fmtMoney(sIndExp)}</td><td class="num ${sIndBud-sIndExp<0?'neg':''}">${fmtMoney(sIndBud-sIndExp)}</td></tr>
       <tr class="total-row"><td>Total</td><td class="num">${fmtMoney(sTotB)}</td><td class="num">${fmtMoney(sTotE)}</td><td class="num ${sTotB-sTotE<0?'neg':''}">${fmtMoney(sTotB-sTotE)}</td></tr>` :
       `<tr class="total-row"><td>Total</td><td class="num">${fmtMoney(sTotB)}</td><td class="num">${fmtMoney(sTotE)}</td><td class="num ${sTotB-sTotE<0?'neg':''}">${fmtMoney(sTotB-sTotE)}</td></tr>`;
-    scsBlock = `<h3 style="font-size:15px;margin:20px 0 10px;">SCS Budget</h3>
+    scsBlock = `<h3 style="font-size:15px;margin:20px 0 10px;">${nonFederalLabel(g)}</h3>
       <div class="card">
         <table><thead><tr><th>Category</th><th class="num">Budgeted</th><th class="num">Expended</th><th class="num">Remaining</th></tr></thead>
         <tbody>${scsRows || '<tr><td colspan="4" style="color:var(--moss);">No SCS categories set — edit the grant to add them.</td></tr>'}
@@ -1118,7 +1128,7 @@ function renderBudgetTab(g, expended){
     <button class="btn-ghost btn btn-sm" id="export-budget-excel">Export (Excel)</button>
     <button class="btn-ghost btn btn-sm" id="export-budget-pdf">Export (PDF)</button>
   </div>
-  <h3 style="font-size:15px;margin-bottom:10px;">Grantor Budget</h3>
+  <h3 style="font-size:15px;margin-bottom:10px;">${budgetSectionLabel(g)}</h3>
   <div class="card">
     <table><thead><tr><th>Category</th><th class="num">Budgeted</th><th class="num">Expended</th><th class="num">Remaining</th></tr></thead>
     <tbody>
@@ -1138,7 +1148,7 @@ function renderInvoicesTab(g){
       <button class="btn" id="add-invoice-btn">+ Add invoice</button>
     </div></div>
   <div class="card">
-    ${invs.length? `<table><thead><tr><th>Inv. #</th><th>Period</th><th class="num">Total</th><th class="num">Indirect</th>${showScsCol?'<th class="num">SCS Total</th><th class="num">SCS Indirect</th>':''}<th>Sent</th><th>Received</th><th></th></tr></thead>
+    ${invs.length? `<table><thead><tr><th>Inv. #</th><th>Period</th><th class="num">Total</th><th class="num">Indirect</th>${showScsCol?`<th class="num">${nonFederalShortLabel(g)} Total</th><th class="num">${nonFederalShortLabel(g)} Indirect</th>`:''}<th>Sent</th><th>Received</th><th></th></tr></thead>
     <tbody>${invs.map(inv=>`<tr>
       <td class="mono">${esc(inv.invoiceNumber)}</td>
       <td>${fmtDate(inv.periodFrom)} – ${fmtDate(inv.periodTo)}</td>
@@ -1402,18 +1412,18 @@ function modalInvoiceHTML(){
       <div class="field"><label>Period from</label><input id="i-from" type="date" value="${d.periodFrom}"></div>
       <div class="field"><label>Period to</label><input id="i-to" type="date" value="${d.periodTo}"></div>
     </div>
-    <h3 style="font-size:13px;margin:14px 0 6px;">Grantor Share</h3>
+    <h3 style="font-size:13px;margin:14px 0 6px;">${shareLabel(g)}</h3>
     ${rateNote}
     <table style="margin:0 0 4px;"><thead><tr><th>Category</th><th class="num">Amount</th></tr></thead>
     <tbody>${sortIndirectLast(g.categories).map(c=>`<tr><td>${esc(c.name)}${catBadge(c)}</td><td class="num"><input class="i-amt" data-cat="${c.id}" data-indirect="${c.isIndirect?'1':''}" type="number" step="0.01" style="width:120px;text-align:right;" value="${d.amounts[c.id]||0}"></td></tr>`).join('')}
     </tbody></table>
     <div style="text-align:right;font-size:13px;font-weight:600;margin:0 0 10px;">Total: <span id="i-grantor-total-display">${fmtMoney(grantorTotalNow)}</span></div>
-    ${hasScs?`<h3 style="font-size:13px;margin:14px 0 6px;">SCS amounts</h3>
+    ${hasScs?`<h3 style="font-size:13px;margin:14px 0 6px;">${nonFederalLabel(g)}</h3>
     ${scsRateNote}
     <table style="margin:0 0 4px;"><thead><tr><th>Category</th><th class="num">Amount</th></tr></thead>
     <tbody>${sortIndirectLast(g.scs.categories).map(c=>`<tr><td>${esc(c.name)}${catBadge(c)}</td><td class="num"><input class="i-scs-amt" data-cat="${c.id}" data-indirect="${c.isIndirect?'1':''}" type="number" step="0.01" style="width:120px;text-align:right;" value="${(d.scsAmounts||{})[c.id]||0}"></td></tr>`).join('')}
     </tbody></table>
-    <div style="text-align:right;font-size:13px;font-weight:600;margin:0 0 10px;">SCS Total: <span id="i-scs-total-display">${fmtMoney(scsTotalNow)}</span></div>`:''}
+    <div style="text-align:right;font-size:13px;font-weight:600;margin:0 0 10px;">${nonFederalShortLabel(g)} Total: <span id="i-scs-total-display">${fmtMoney(scsTotalNow)}</span></div>`:''}
     ${g.inKind && g.inKind.enabled? `<div class="card" style="background:var(--sage);border:none;padding:10px 14px;margin:0 0 14px;">
       <span style="font-size:12.5px;color:var(--forest-dark);">In-Kind to date (informational — not part of this invoice's totals): <b>${fmtMoney(totalInKindContributed(g))}</b></span>
     </div>` : ''}
@@ -1633,20 +1643,20 @@ function printInvoice(invoiceId){
     </div>
     <table class="inv-table" style="width:100%;">
       ${colgroup}
-      <tr><td><b>Funder</b></td><td>${esc(g.funderName)}</td></tr>
+      <tr><td><b>${funderFieldLabel(g)}</b></td><td>${esc(g.funderName)}</td></tr>
       <tr><td><b>Agreement #</b></td><td>${esc(g.agreementNumber)}</td></tr>
       <tr><td><b>Invoice #</b></td><td>${esc(inv.invoiceNumber)}</td></tr>
       <tr><td><b>Period covered</b></td><td>${fmtDate(inv.periodFrom)} – ${fmtDate(inv.periodTo)}</td></tr>
     </table>
     <table class="inv-table" style="width:100%;">
       ${colgroup}
-      <thead><tr><th colspan="2">Grantor Share</th></tr></thead>
-      <tbody>${rows}<tr><td><b>Total requested</b></td><td style="text-align:right;"><b>${fmtMoney(inv.total)}</b></td></tr></tbody>
+      <thead><tr><th colspan="2">${shareLabel(g)}</th></tr></thead>
+      <tbody>${rows}<tr><td><b>${totalRequestedLabel(g)}</b></td><td style="text-align:right;"><b>${fmtMoney(inv.total)}</b></td></tr></tbody>
     </table>
     ${hasScs? `<table class="inv-table" style="width:100%;">
       ${colgroup}
-      <thead><tr><th colspan="2">SCS amounts</th></tr></thead>
-      <tbody>${scsRows}<tr><td><b>SCS total</b></td><td style="text-align:right;"><b>${fmtMoney(inv.scsTotal||0)}</b></td></tr></tbody>
+      <thead><tr><th colspan="2">${nonFederalLabel(g)}</th></tr></thead>
+      <tbody>${scsRows}<tr><td><b>${nonFederalShortLabel(g)} total</b></td><td style="text-align:right;"><b>${fmtMoney(inv.scsTotal||0)}</b></td></tr></tbody>
     </table>` : ''}
     ${g.inKind && g.inKind.enabled? `<table class="inv-table" style="width:100%;">
       ${colgroup}
@@ -1656,7 +1666,8 @@ function printInvoice(invoiceId){
     ${inv.signatureData? `<img src="${inv.signatureData}" style="max-width:260px;max-height:80px;display:block;margin-top:20px;">` : ''}
     <div class="sig-line">Signature of Authorized Certifying Official</div>
     ${inv.signatureDate? `<div style="font-size:10px;color:#555;margin-top:3px;">Date: ${fmtDate(inv.signatureDate)}</div>` : ''}
-    <div class="sig-line" style="margin-top:30px;">${inv.signerName? esc(inv.signerName)+(inv.signerTitle? ', '+esc(inv.signerTitle):'') : 'Printed Name and Title'}</div>
+    <div style="margin-top:30px;font-size:11px;">${inv.signerName? esc(inv.signerName)+(inv.signerTitle? ', '+esc(inv.signerTitle):'') : '\u00A0'}</div>
+    <div class="sig-line" style="margin-top:2px;">Printed Name and Title</div>
   `);
 }
 function printBudgetReport(gid){
@@ -1689,7 +1700,7 @@ function printBudgetReport(gid){
       <tr><td><b>Indirect Cost</b></td><td style="text-align:right;"><b>${fmtMoney(sIndBud)}</b></td><td style="text-align:right;"><b>${fmtMoney(sIndExp)}</b></td><td style="text-align:right;"><b>${fmtMoney(sIndBud-sIndExp)}</b></td></tr>
       <tr><td><b>Total</b></td><td style="text-align:right;"><b>${fmtMoney(scsTotB)}</b></td><td style="text-align:right;"><b>${fmtMoney(scsTotE)}</b></td><td style="text-align:right;"><b>${fmtMoney(scsTotB-scsTotE)}</b></td></tr>` :
       `<tr><td><b>Total</b></td><td style="text-align:right;"><b>${fmtMoney(scsTotB)}</b></td><td style="text-align:right;"><b>${fmtMoney(scsTotE)}</b></td><td style="text-align:right;"><b>${fmtMoney(scsTotB-scsTotE)}</b></td></tr>`;
-    scsSection = `<h3 style="margin-top:16px;font-size:13px;">SCS Budget</h3>
+    scsSection = `<h3 style="margin-top:16px;font-size:13px;">${nonFederalLabel(g)}</h3>
     <table class="inv-table" style="width:100%;">
       <colgroup><col style="width:40%;"><col style="width:20%;"><col style="width:20%;"><col style="width:20%;"></colgroup>
       <thead><tr><th>Category</th><th style="text-align:right;">Budgeted</th><th style="text-align:right;">Expended</th><th style="text-align:right;">Remaining</th></tr></thead>
@@ -1713,7 +1724,7 @@ function printBudgetReport(gid){
   showPrintSheet(`
     <div class="inv-header"><h2>Budget Report</h2><div>${esc(state.orgSettings.orgName)}</div>
       <div>${esc(g.funderName)} — ${esc(g.projectName)}</div><div>${esc(g.agreementNumber)}</div></div>
-    <h3 style="font-size:13px;">Grantor Budget</h3>
+    <h3 style="font-size:13px;">${budgetSectionLabel(g)}</h3>
     <table class="inv-table" style="width:100%;">
       <colgroup><col style="width:40%;"><col style="width:20%;"><col style="width:20%;"><col style="width:20%;"></colgroup>
       <thead><tr><th>Category</th><th style="text-align:right;">Budgeted</th><th style="text-align:right;">Expended</th><th style="text-align:right;">Remaining</th></tr></thead>
@@ -1803,7 +1814,7 @@ function snapshotBudgetTable(g){
       <tr style="font-weight:600;background:#EDEBDF;"><td>Indirect Cost</td><td style="text-align:right;">${fmtMoney(indirectScsBudgeted(g))}</td><td style="text-align:right;">${fmtMoney(indirectScsExpended(g.id))}</td><td style="text-align:right;">${fmtMoney(indirectScsBudgeted(g)-indirectScsExpended(g.id))}</td></tr>
       <tr style="font-weight:700;background:#EDEBDF;"><td>Total</td><td style="text-align:right;">${fmtMoney(sTotB)}</td><td style="text-align:right;">${fmtMoney(sTotE)}</td><td style="text-align:right;">${fmtMoney(sTotB-sTotE)}</td></tr>` :
       `<tr style="font-weight:700;background:#EDEBDF;"><td>Total</td><td style="text-align:right;">${fmtMoney(sTotB)}</td><td style="text-align:right;">${fmtMoney(sTotE)}</td><td style="text-align:right;">${fmtMoney(sTotB-sTotE)}</td></tr>`;
-    html += `<div style="font-size:12px;font-weight:600;margin-top:10px;">SCS Budget</div>
+    html += `<div style="font-size:12px;font-weight:600;margin-top:10px;">${nonFederalLabel(g)}</div>
     <table style="width:100%;border-collapse:collapse;font-size:12px;">
     <tr style="border-bottom:1px solid #999;"><th style="text-align:left;padding:4px;">Category</th><th style="text-align:right;padding:4px;">Budgeted</th><th style="text-align:right;padding:4px;">Expended</th><th style="text-align:right;padding:4px;">Remaining</th></tr>
     ${scsLineRows}${scsSummary}
@@ -1898,7 +1909,7 @@ function exportGrantsExcel(){
   const sheets = [{name:'Grants Overview', rows: summaryRows}];
   state.grants.forEach(g=>{
     const expended = expendedByCategory(g.id);
-    const rows = [[g.funderName+' — '+g.projectName],['Agreement #', g.agreementNumber],[],['Grantor Budget'],['Category','Budgeted','Expended','Remaining']];
+    const rows = [[g.funderName+' — '+g.projectName],['Agreement #', g.agreementNumber],[],[budgetSectionLabel(g)],['Category','Budgeted','Expended','Remaining']];
     g.categories.filter(c=>!c.isIndirect).forEach(c=>{
       const bud = Number(g.budgeted[c.id]||0), exp = expended[c.id]||0;
       rows.push([c.name, bud, exp, bud-exp]);
@@ -1910,7 +1921,7 @@ function exportGrantsExcel(){
     rows.push(['Total', totalBudgeted(g), totalExpended(g.id), totalBudgeted(g)-totalExpended(g.id)]);
     if(g.scs && g.scs.enabled){
       const scsExpended = expendedByScsCategory(g.id);
-      rows.push([],['SCS Budget'],['Category','Budgeted','Expended','Remaining']);
+      rows.push([],[nonFederalLabel(g)],['Category','Budgeted','Expended','Remaining']);
       g.scs.categories.filter(c=>!c.isIndirect).forEach(c=>{
         const bud = Number(g.scs.budgeted[c.id]||0), exp = scsExpended[c.id]||0;
         rows.push([c.name, bud, exp, bud-exp]);
@@ -1935,7 +1946,7 @@ function exportGrantsExcel(){
 function exportBudgetExcel(gid){
   const g = getGrant(gid); if(!g) return;
   const expended = expendedByCategory(gid);
-  const rows = [[g.funderName+' — '+g.projectName],['Agreement #', g.agreementNumber],[],['Grantor Budget'],['Category','Budgeted','Expended','Remaining']];
+  const rows = [[g.funderName+' — '+g.projectName],['Agreement #', g.agreementNumber],[],[budgetSectionLabel(g)],['Category','Budgeted','Expended','Remaining']];
   g.categories.filter(c=>!c.isIndirect).forEach(c=>{
     const bud = Number(g.budgeted[c.id]||0), exp = expended[c.id]||0;
     rows.push([c.name, bud, exp, bud-exp]);
@@ -1948,7 +1959,7 @@ function exportBudgetExcel(gid){
   rows.push(['Total', totB, totE, totB-totE]);
   if(g.scs && g.scs.enabled){
     const scsExpended = expendedByScsCategory(gid);
-    rows.push([],['SCS Budget'],['Category','Budgeted','Expended','Remaining']);
+    rows.push([],[nonFederalLabel(g)],['Category','Budgeted','Expended','Remaining']);
     g.scs.categories.filter(c=>!c.isIndirect).forEach(c=>{
       const bud = Number(g.scs.budgeted[c.id]||0), exp = scsExpended[c.id]||0;
       rows.push([c.name, bud, exp, bud-exp]);
@@ -1977,8 +1988,8 @@ function exportInvoicesExcel(gid){
   const hasScs = g.scs && g.scs.enabled;
   const orderedCats = sortIndirectLast(g.categories);
   const orderedScsCats = hasScs ? sortIndirectLast(g.scs.categories) : [];
-  const header = ['Invoice #','Period From','Period To', ...orderedCats.map(c=>c.name), 'Total',
-    ...(hasScs? orderedScsCats.map(c=>'SCS: '+c.name) : []), ...(hasScs? ['SCS Total'] : []),
+  const header = ['Invoice #','Period From','Period To', ...orderedCats.map(c=>c.name), totalRequestedLabel(g),
+    ...(hasScs? orderedScsCats.map(c=>nonFederalShortLabel(g)+': '+c.name) : []), ...(hasScs? [nonFederalShortLabel(g)+' Total'] : []),
     'Sent Date','Received Date'];
   const rows = [header];
   invs.forEach(inv=>{
