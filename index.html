@@ -141,8 +141,8 @@
   }
   .inv-header{text-align:center;margin-bottom:18px;}
   .inv-header h2{font-size:16px;}
+  .inv-table{margin:14px 0;border-collapse:collapse;}
   .inv-table td, .inv-table th{border:1px solid #999;padding:6px 8px;}
-  .inv-table{margin:14px 0;}
   .sig-line{border-top:1px solid #333;margin-top:40px;padding-top:4px;font-size:11px;width:340px;white-space:nowrap;}
 </style>
 </head>
@@ -1631,9 +1631,28 @@ function printInvoice(invoiceId){
   const g = getGrant(inv.grantId);
   const org = state.orgSettings;
   const colgroup = '<colgroup><col style="width:60%;"><col style="width:40%;"></colgroup>';
-  const rows = sortIndirectLast(g.categories).map(c=> `<tr><td>${esc(c.name)}</td><td style="text-align:right;">${fmtMoney(inv.amounts[c.id]||0)}</td></tr>`).join('');
+
+  const directCats = g.categories.filter(c=>!c.isIndirect);
+  const indirectCat = g.categories.find(c=>c.isIndirect);
+  const directRows = directCats.map(c=> `<tr><td>${esc(c.name)}</td><td style="text-align:right;">${fmtMoney(inv.amounts[c.id]||0)}</td></tr>`).join('');
+  const directTotal = directCats.reduce((s,c)=> s+Number(inv.amounts[c.id]||0),0);
+  const indirectRowHtml = indirectCat ? `<tr><td>${esc(indirectCat.name)}</td><td style="text-align:right;">${fmtMoney(inv.amounts[indirectCat.id]||0)}</td></tr>` : '';
+  const rows = indirectCat
+    ? `${directRows}<tr><td><b>Direct Total</b></td><td style="text-align:right;"><b>${fmtMoney(directTotal)}</b></td></tr>${indirectRowHtml}`
+    : directRows;
+
   const hasScs = g.scs && g.scs.enabled;
-  const scsRows = hasScs ? sortIndirectLast(g.scs.categories).map(c=> `<tr><td>${esc(c.name)}</td><td style="text-align:right;">${fmtMoney((inv.scsAmounts||{})[c.id]||0)}</td></tr>`).join('') : '';
+  let scsRows = '';
+  if(hasScs){
+    const scsDirectCats = g.scs.categories.filter(c=>!c.isIndirect);
+    const scsIndirectCat = g.scs.categories.find(c=>c.isIndirect);
+    const scsDirectRows = scsDirectCats.map(c=> `<tr><td>${esc(c.name)}</td><td style="text-align:right;">${fmtMoney((inv.scsAmounts||{})[c.id]||0)}</td></tr>`).join('');
+    const scsDirectTotal = scsDirectCats.reduce((s,c)=> s+Number((inv.scsAmounts||{})[c.id]||0),0);
+    const scsIndirectRowHtml = scsIndirectCat ? `<tr><td>${esc(scsIndirectCat.name)}</td><td style="text-align:right;">${fmtMoney((inv.scsAmounts||{})[scsIndirectCat.id]||0)}</td></tr>` : '';
+    scsRows = scsIndirectCat
+      ? `${scsDirectRows}<tr><td><b>Direct Total</b></td><td style="text-align:right;"><b>${fmtMoney(scsDirectTotal)}</b></td></tr>${scsIndirectRowHtml}`
+      : scsDirectRows;
+  }
   showPrintSheet(`
     <div class="inv-header">
       <h2>Request for Reimbursement</h2>
