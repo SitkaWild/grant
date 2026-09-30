@@ -141,7 +141,8 @@
   }
   .inv-header{text-align:center;margin-bottom:18px;}
   .inv-header h2{font-size:16px;}
-  .inv-table{margin:14px 0;border-collapse:collapse;}
+  .inv-table{margin:14px 0;border-collapse:collapse;page-break-inside:avoid;break-inside:avoid;}
+  .inv-table tr{page-break-inside:avoid;break-inside:avoid;}
   .inv-table td, .inv-table th{border:1px solid #999;padding:6px 8px;}
   .sig-line{border-top:1px solid #333;margin-top:40px;padding-top:4px;font-size:11px;width:340px;white-space:nowrap;}
 </style>
@@ -1148,13 +1149,13 @@ function renderInvoicesTab(g){
       <button class="btn" id="add-invoice-btn">+ Add invoice</button>
     </div></div>
   <div class="card">
-    ${invs.length? `<table><thead><tr><th>Inv. #</th><th>Period</th><th class="num">Total</th><th class="num">Indirect</th>${showScsCol?`<th class="num">${nonFederalShortLabel(g)} Total</th><th class="num">${nonFederalShortLabel(g)} Indirect</th>`:''}<th>Sent</th><th>Received</th><th></th></tr></thead>
+    ${invs.length? `<table><thead><tr><th>Inv. #</th><th>Period</th><th class="num">Total</th><th class="num">Indirect</th>${showScsCol?`<th class="num" style="white-space:nowrap;border-left:2px solid var(--line-strong);">${nonFederalShortLabel(g)} Total</th><th class="num" style="white-space:nowrap;">${nonFederalShortLabel(g)} Indirect</th>`:''}<th>Sent</th><th>Received</th><th></th></tr></thead>
     <tbody>${invs.map(inv=>`<tr>
       <td class="mono">${esc(inv.invoiceNumber)}</td>
       <td>${fmtDate(inv.periodFrom)} – ${fmtDate(inv.periodTo)}</td>
       <td class="num">${fmtMoney(inv.total)}</td>
       <td class="num">${fmtMoney(invoiceIndirectAmount(inv, g.categories))}</td>
-      ${showScsCol?`<td class="num">${fmtMoney(inv.scsTotal||0)}</td><td class="num">${fmtMoney(invoiceScsIndirectAmount(inv, g.scs.categories))}</td>`:''}
+      ${showScsCol?`<td class="num" style="border-left:2px solid var(--line-strong);">${fmtMoney(inv.scsTotal||0)}</td><td class="num">${fmtMoney(invoiceScsIndirectAmount(inv, g.scs.categories))}</td>`:''}
       <td>${fmtDate(inv.sentDate)}</td>
       <td>${inv.receivedDate? fmtDate(inv.receivedDate) : '<span style="color:var(--brass);">pending</span>'}</td>
       <td><button class="link-btn" data-print="${inv.id}">Print</button> · <button class="link-btn" data-edit-inv="${inv.id}">Edit</button></td>
@@ -1418,15 +1419,14 @@ function modalInvoiceHTML(){
     <tbody>${sortIndirectLast(g.categories).map(c=>`<tr><td>${esc(c.name)}${catBadge(c)}</td><td class="num"><input class="i-amt" data-cat="${c.id}" data-indirect="${c.isIndirect?'1':''}" type="number" step="0.01" style="width:120px;text-align:right;" value="${d.amounts[c.id]||0}"></td></tr>`).join('')}
     </tbody></table>
     <div style="text-align:right;font-size:13px;font-weight:600;margin:0 0 10px;">Total: <span id="i-grantor-total-display">${fmtMoney(grantorTotalNow)}</span></div>
+    ${(!hasScs && g.inKind && g.inKind.enabled)? `<div style="text-align:right;font-size:12px;color:var(--moss);margin:-6px 0 14px;">In-Kind to date: <b>${fmtMoney(totalInKindContributed(g))}</b></div>` : ''}
     ${hasScs?`<h3 style="font-size:13px;margin:14px 0 6px;">${nonFederalLabel(g)}</h3>
     ${scsRateNote}
     <table style="margin:0 0 4px;"><thead><tr><th>Category</th><th class="num">Amount</th></tr></thead>
     <tbody>${sortIndirectLast(g.scs.categories).map(c=>`<tr><td>${esc(c.name)}${catBadge(c)}</td><td class="num"><input class="i-scs-amt" data-cat="${c.id}" data-indirect="${c.isIndirect?'1':''}" type="number" step="0.01" style="width:120px;text-align:right;" value="${(d.scsAmounts||{})[c.id]||0}"></td></tr>`).join('')}
     </tbody></table>
-    <div style="text-align:right;font-size:13px;font-weight:600;margin:0 0 10px;">${nonFederalShortLabel(g)} Total: <span id="i-scs-total-display">${fmtMoney(scsTotalNow)}</span></div>`:''}
-    ${g.inKind && g.inKind.enabled? `<div class="card" style="background:var(--sage);border:none;padding:10px 14px;margin:0 0 14px;">
-      <span style="font-size:12.5px;color:var(--forest-dark);">In-Kind to date (informational — not part of this invoice's totals): <b>${fmtMoney(totalInKindContributed(g))}</b></span>
-    </div>` : ''}
+    <div style="text-align:right;font-size:13px;font-weight:600;margin:0 0 10px;">${nonFederalShortLabel(g)} Total: <span id="i-scs-total-display">${fmtMoney(scsTotalNow)}</span></div>
+    ${g.inKind && g.inKind.enabled? `<div style="text-align:right;font-size:12px;color:var(--moss);margin:-6px 0 14px;">In-Kind to date: <b>${fmtMoney(totalInKindContributed(g))}</b></div>` : ''}`:''}
     <div class="row">
       <div class="field"><label>Sent date</label><input id="i-sent" type="date" value="${d.sentDate}"></div>
       <div class="field"><label>Payment received date</label><input id="i-recv" type="date" value="${d.receivedDate}"></div>
@@ -1670,16 +1670,12 @@ function printInvoice(invoiceId){
     <table class="inv-table" style="width:100%;">
       ${colgroup}
       <thead><tr><th colspan="2">${shareLabel(g)}</th></tr></thead>
-      <tbody>${rows}<tr><td><b>${totalRequestedLabel(g)}</b></td><td style="text-align:right;"><b>${fmtMoney(inv.total)}</b></td></tr></tbody>
+      <tbody>${rows}<tr><td><b>${totalRequestedLabel(g)}</b></td><td style="text-align:right;"><b>${fmtMoney(inv.total)}</b></td></tr>${(!hasScs && g.inKind && g.inKind.enabled)? `<tr><td>In-Kind to date</td><td style="text-align:right;">${fmtMoney(totalInKindContributed(g))}</td></tr>`:''}</tbody>
     </table>
     ${hasScs? `<table class="inv-table" style="width:100%;">
       ${colgroup}
       <thead><tr><th colspan="2">${nonFederalLabel(g)}</th></tr></thead>
-      <tbody>${scsRows}<tr><td><b>${nonFederalShortLabel(g)} total</b></td><td style="text-align:right;"><b>${fmtMoney(inv.scsTotal||0)}</b></td></tr></tbody>
-    </table>` : ''}
-    ${g.inKind && g.inKind.enabled? `<table class="inv-table" style="width:100%;">
-      ${colgroup}
-      <tbody><tr><td>In-Kind to date</td><td style="text-align:right;">${fmtMoney(totalInKindContributed(g))}</td></tr></tbody>
+      <tbody>${scsRows}<tr><td><b>${nonFederalShortLabel(g)} total</b></td><td style="text-align:right;"><b>${fmtMoney(inv.scsTotal||0)}</b></td></tr>${(g.inKind && g.inKind.enabled)? `<tr><td>In-Kind to date</td><td style="text-align:right;">${fmtMoney(totalInKindContributed(g))}</td></tr>`:''}</tbody>
     </table>` : ''}
     ${inv.notes? `<div style="margin-top:14px;font-size:11px;"><b>Notes:</b> ${esc(inv.notes).replace(/\n/g,'<br>')}</div>` : ''}
     ${inv.signatureData? `<img src="${inv.signatureData}" style="max-width:260px;max-height:80px;display:block;margin-top:20px;">` : ''}
