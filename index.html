@@ -1659,19 +1659,14 @@ function shareBlockHTML(g, inv, isScs, heading, nowLabel, extraRow){
   const periodTotal = isScs ? (inv.scsTotal||0) : inv.total;
   const cumTotal = cumulativeShareTotal(g, isScs);
   const prevRequested = cumTotal - periodTotal;
+  bodyRows += `<tr><td colspan="2" style="border-right:none;">Total expenditures to date</td><td style="text-align:right;">${fmtMoney(cumTotal)}</td></tr>`;
+  bodyRows += `<tr><td colspan="2" style="border-right:none;">Less: Previous amounts requested</td><td style="text-align:right;">${fmtMoney(prevRequested)}</td></tr>`;
+  bodyRows += `<tr><td colspan="2" style="border-right:none;"><b>${nowLabel}</b></td><td style="text-align:right;"><b>${fmtMoney(periodTotal)}</b></td></tr>`;
+  if(extraRow) bodyRows += extraRow;
   return `<div class="inv-table-wrap"><table class="inv-table" style="width:100%;">
       <colgroup><col style="width:36%;"><col style="width:32%;"><col style="width:32%;"></colgroup>
       <thead><tr><th colspan="3">${heading}</th></tr><tr><th>Category</th><th style="text-align:right;">This Period</th><th style="text-align:right;">Cumulative to Date</th></tr></thead>
       <tbody>${bodyRows}</tbody>
-    </table></div>
-    <div class="inv-table-wrap"><table class="inv-table" style="width:100%;">
-      <colgroup><col style="width:60%;"><col style="width:40%;"></colgroup>
-      <tbody>
-        <tr><td>Total expenditures to date</td><td style="text-align:right;">${fmtMoney(cumTotal)}</td></tr>
-        <tr><td>Less: Previous amounts requested</td><td style="text-align:right;">${fmtMoney(prevRequested)}</td></tr>
-        <tr><td><b>${nowLabel}</b></td><td style="text-align:right;"><b>${fmtMoney(periodTotal)}</b></td></tr>
-        ${extraRow||''}
-      </tbody>
     </table></div>`;
 }
 function printInvoice(invoiceId){
@@ -1680,7 +1675,7 @@ function printInvoice(invoiceId){
   const org = state.orgSettings;
   const colgroup = '<colgroup><col style="width:30%;"><col style="width:70%;"></colgroup>';
   const hasScs = g.scs && g.scs.enabled;
-  const inKindRow = (g.inKind && g.inKind.enabled) ? `<tr><td>In-Kind to date</td><td style="text-align:right;">${fmtMoney(totalInKindContributed(g))}</td></tr>` : '';
+  const inKindRow = (g.inKind && g.inKind.enabled) ? `<tr><td colspan="2" style="border-right:none;">In-Kind to date</td><td style="text-align:right;">${fmtMoney(totalInKindContributed(g))}</td></tr>` : '';
 
   const federalBlock = shareBlockHTML(g, inv, false, shareLabel(g), totalRequestedLabel(g), hasScs? '' : inKindRow);
   const nonFederalBlock = hasScs ? shareBlockHTML(g, inv, true, nonFederalLabel(g), nonFederalShortLabel(g)+' Share Now Requested', inKindRow) : '';
