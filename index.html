@@ -112,6 +112,8 @@
   .icon-x{background:none;border:none;color:var(--rust);font-size:16px;padding:2px 8px;}
   .empty{color:var(--moss);font-size:13px;padding:24px;text-align:center;background:var(--sage);border-radius:6px;}
   .due-row{display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid var(--line);}
+  .due-row-link{cursor:pointer;}
+  .due-row-link:hover{text-decoration:underline;}
   .due-row:last-child{border-bottom:none;}
   .due-tag{font-size:10.5px;padding:2px 8px;border-radius:10px;font-weight:600;}
   .due-tag.overdue{background:#F5E7E4;color:var(--rust);}
@@ -134,7 +136,7 @@
   /* print view */
   #printSheet{display:none;}
   @media print{
-    @page{ size: landscape; margin: 0.5in; }
+    @page{ size: portrait; margin: 0.5in; }
     #root{display:none !important;}
     .modal-bg{display:none !important;}
     #printSheet{display:block !important;position:static;width:100%;padding:20px;margin:0;}
@@ -697,7 +699,7 @@ function renderDashboard(){
 function renderDueRow(d){
   const days = daysUntil(d.date);
   const tagClass = days<0 ? 'overdue' : (days<=30 ? 'warn' : 'ok');
-  return `<div class="due-row"><div><b>${esc(d.grant.funderName)}</b> — ${esc(d.grant.projectName)} · ${d.type}</div>
+  return `<div class="due-row"><div data-open-grant="${d.grant.id}" class="due-row-link"><b>${esc(d.grant.funderName)}</b> — ${esc(d.grant.projectName)} · ${d.type}</div>
     <div><span class="due-tag ${tagClass}">${fmtDate(d.date)} ${days<0?'(overdue)': `(${days}d)`}</span><button class="mark-btn" data-mark-submitted="${d.grant.id}" data-key="${d.key}">Mark submitted</button></div></div>`;
 }
 function renderGrantCard(g){
@@ -717,6 +719,11 @@ function attachDueRowEvents(){
   document.querySelectorAll('[data-mark-submitted]').forEach(b=> b.onclick = ()=>{
     if(!confirm('Mark this report as submitted today? This clears the due date until you set a new one.')) return;
     markReportSubmitted(b.dataset.markSubmitted, b.dataset.key);
+  });
+  document.querySelectorAll('[data-open-grant]').forEach(el=> el.onclick = ()=>{
+    state.selectedGrantId = el.dataset.openGrant;
+    state.grantTab = 'reporting';
+    render();
   });
 }
 function attachDashboardEvents(){
@@ -1653,7 +1660,7 @@ function shareBlockHTML(g, inv, isScs, heading, nowLabel, extraRow){
   const cumTotal = cumulativeShareTotal(g, isScs);
   const prevRequested = cumTotal - periodTotal;
   return `<div class="inv-table-wrap"><table class="inv-table" style="width:100%;">
-      <colgroup><col style="width:46%;"><col style="width:27%;"><col style="width:27%;"></colgroup>
+      <colgroup><col style="width:50%;"><col style="width:25%;"><col style="width:25%;"></colgroup>
       <thead><tr><th colspan="3">${heading}</th></tr><tr><th>Category</th><th style="text-align:right;">This Period</th><th style="text-align:right;">Cumulative to Date</th></tr></thead>
       <tbody>${bodyRows}</tbody>
     </table></div>
@@ -1671,7 +1678,7 @@ function printInvoice(invoiceId){
   const inv = state.invoices.find(i=>i.id===invoiceId);
   const g = getGrant(inv.grantId);
   const org = state.orgSettings;
-  const colgroup = '<colgroup><col style="width:60%;"><col style="width:40%;"></colgroup>';
+  const colgroup = '<colgroup><col style="width:30%;"><col style="width:70%;"></colgroup>';
   const hasScs = g.scs && g.scs.enabled;
   const inKindRow = (g.inKind && g.inKind.enabled) ? `<tr><td>In-Kind to date</td><td style="text-align:right;">${fmtMoney(totalInKindContributed(g))}</td></tr>` : '';
 
@@ -2207,10 +2214,11 @@ function printStandaloneInvoice(id){
       <h2>Invoice</h2>
       <div>${esc(org.orgName)}</div>
       <div>${esc(org.address||'')}</div>
+      ${org.phone? `<div>Phone: ${esc(org.phone)}</div>`:''}
       ${org.ein? `<div>EIN: ${esc(org.ein)}</div>`:''}
     </div>
     <div class="inv-table-wrap"><table class="inv-table" style="width:100%;">
-      <colgroup><col style="width:60%;"><col style="width:40%;"></colgroup>
+      <colgroup><col style="width:30%;"><col style="width:70%;"></colgroup>
       <tr><td><b>Billed to</b></td><td>${esc(s.billedTo)}</td></tr>
       <tr><td><b>Invoice #</b></td><td>${esc(s.invoiceNumber)}</td></tr>
       <tr><td><b>Date</b></td><td>${fmtDate(s.sentDate)}</td></tr>
