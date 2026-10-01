@@ -136,7 +136,7 @@
   /* print view */
   #printSheet{display:none;}
   @media print{
-    @page{ size: portrait; margin: 0.35in; }
+    @page{ size: portrait; margin-top: 0.15in; margin-bottom: 0.15in; margin-left: 0.35in; margin-right: 0.35in; }
     #root{display:none !important;}
     .modal-bg{display:none !important;}
     #printSheet{display:block !important;position:static;width:100%;padding:20px;margin:0;}
@@ -1637,11 +1637,21 @@ function attachInvoiceModalEvents(){
 
 /* ============ PRINT (PDF via browser print/save-as-PDF) ============ */
 function showPrintSheet(html){
-  document.getElementById('printSheet').innerHTML = html;
+  const sheet = document.getElementById('printSheet');
+  sheet.innerHTML = html;
   const originalTitle = document.title;
   document.title = ' ';
-  window.print();
-  setTimeout(()=>{ document.title = originalTitle; }, 500);
+  const imgs = Array.from(sheet.querySelectorAll('img'));
+  const imagesReady = imgs.length
+    ? Promise.all(imgs.map(img => img.complete ? Promise.resolve() : new Promise(res=>{ img.onload=res; img.onerror=res; })))
+    : Promise.resolve();
+  imagesReady.then(()=>{
+    // extra animation frames to make sure the browser has actually painted before snapshotting for print
+    requestAnimationFrame(()=> requestAnimationFrame(()=>{
+      window.print();
+      setTimeout(()=>{ document.title = originalTitle; }, 500);
+    }));
+  });
 }
 function shareBlockHTML(g, inv, isScs, heading, nowLabel, extraRow){
   const cats = isScs ? g.scs.categories : g.categories;
@@ -1700,7 +1710,7 @@ function printInvoice(invoiceId){
     ${nonFederalBlock}
     ${inv.notes? `<div style="margin-top:14px;font-size:11px;"><b>Notes:</b> ${esc(inv.notes).replace(/\n/g,'<br>')}</div>` : ''}
     ${inv.signatureData? `<img src="${inv.signatureData}" style="max-width:260px;max-height:80px;display:block;margin-top:14px;">` : ''}
-    <div style="border-top:1px solid #333;margin-top:10px;padding-top:4px;width:100%;display:flex;justify-content:space-between;font-size:11px;">
+    <div style="border-top:1px solid #333;margin-top:26px;padding-top:4px;width:100%;display:flex;justify-content:space-between;font-size:11px;">
       <span>${inv.signerName? esc(inv.signerName)+(inv.signerTitle? ', '+esc(inv.signerTitle):'') : '\u00A0'}</span>
       <span>${inv.signatureDate? 'Date: '+fmtDate(inv.signatureDate) : ''}</span>
     </div>
