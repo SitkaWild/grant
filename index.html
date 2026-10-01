@@ -134,6 +134,7 @@
   /* print view */
   #printSheet{display:none;}
   @media print{
+    @page{ size: landscape; margin: 0.5in; }
     #root{display:none !important;}
     .modal-bg{display:none !important;}
     #printSheet{display:block !important;position:static;width:100%;padding:20px;margin:0;}
@@ -141,8 +142,8 @@
   }
   .inv-header{text-align:center;margin-bottom:18px;}
   .inv-header h2{font-size:16px;}
-  .inv-table{margin:14px 0;border-collapse:collapse;page-break-inside:avoid;break-inside:avoid;}
-  .inv-table tr{page-break-inside:avoid;break-inside:avoid;}
+  .inv-table-wrap{page-break-inside:avoid;break-inside:avoid;display:inline-block;width:100%;}
+  .inv-table{width:100%;margin:14px 0;border-collapse:collapse;}
   .inv-table td, .inv-table th{border:1px solid #999;padding:6px 8px;}
   .sig-line{border-top:1px solid #333;margin-top:40px;padding-top:4px;font-size:11px;width:340px;white-space:nowrap;}
 </style>
@@ -271,7 +272,7 @@ async function loadAllData(){
     sb.from('standalone_invoices').select('*'),
   ]);
   return {
-    orgSettings: orgRes.data ? { orgName: orgRes.data.org_name||'', ein: orgRes.data.ein||'', address: orgRes.data.address||'', fyStartMonth: orgRes.data.fy_start_month||10 } : { orgName:'', ein:'', address:'', fyStartMonth:10 },
+    orgSettings: orgRes.data ? { orgName: orgRes.data.org_name||'', ein: orgRes.data.ein||'', address: orgRes.data.address||'', phone: orgRes.data.phone||'', fyStartMonth: orgRes.data.fy_start_month||10 } : { orgName:'', ein:'', address:'', phone:'', fyStartMonth:10 },
     staff: (staffRes.data||[]).map(s=>({id:s.id, name:s.name, role:s.role})),
     grants: (grantsRes.data||[]).map(rowToGrant),
     invoices: (invRes.data||[]).map(rowToInvoice),
@@ -289,7 +290,7 @@ async function deleteStandaloneInvoiceRow(id){
 }
 async function saveOrgSettings(orgSettings){
   await sb.from('org_settings').update({
-    org_name: orgSettings.orgName, ein: orgSettings.ein, address: orgSettings.address, fy_start_month: orgSettings.fyStartMonth
+    org_name: orgSettings.orgName, ein: orgSettings.ein, address: orgSettings.address, phone: orgSettings.phone||'', fy_start_month: orgSettings.fyStartMonth
   }).eq('id', 1);
 }
 async function saveGrant(g){
@@ -370,6 +371,15 @@ function invoiceIndirectAmount(inv, categories){
 function invoiceScsIndirectAmount(inv, scsCategories){
   const indirectCat = (scsCategories||[]).find(c=>c.isIndirect);
   return indirectCat ? Number((inv.scsAmounts||{})[indirectCat.id]||0) : 0;
+}
+function cumulativeByCategory(g, isScs, catId){
+  return grantInvoices(g.id).reduce((s,inv)=>{
+    const map = isScs ? (inv.scsAmounts||{}) : (inv.amounts||{});
+    return s + Number(map[catId]||0);
+  }, 0);
+}
+function cumulativeShareTotal(g, isScs){
+  return grantInvoices(g.id).reduce((s,inv)=> s + Number(isScs ? (inv.scsTotal||0) : (inv.total||0)), 0);
 }
 function expendedByCategory(gid){
   const g = getGrant(gid); if(!g) return {};
@@ -1626,57 +1636,67 @@ function showPrintSheet(html){
   window.print();
   setTimeout(()=>{ document.title = originalTitle; }, 500);
 }
+function shareBlockHTML(g, inv, isScs, heading, nowLabel, extraRow){
+  const cats = isScs ? g.scs.categories : g.categories;
+  const amountsMap = isScs ? (inv.scsAmounts||{}) : (inv.amounts||{});
+  const directCats = cats.filter(c=>!c.isIndirect);
+  const indirectCat = cats.find(c=>c.isIndirect);
+  const catRow = (c)=> `<tr><td>${esc(c.name)}</td><td style="text-align:right;">${fmtMoney(amountsMap[c.id]||0)}</td><td style="text-align:right;">${fmtMoney(cumulativeByCategory(g,isScs,c.id))}</td></tr>`;
+  let bodyRows = directCats.map(catRow).join('');
+  const directPeriodTotal = directCats.reduce((s,c)=> s+Number(amountsMap[c.id]||0),0);
+  const directCumTotal = directCats.reduce((s,c)=> s+cumulativeByCategory(g,isScs,c.id),0);
+  if(indirectCat){
+    bodyRows += `<tr><td><b>Direct Total</b></td><td style="text-align:right;"><b>${fmtMoney(directPeriodTotal)}</b></td><td style="text-align:right;"><b>${fmtMoney(directCumTotal)}</b></td></tr>`;
+    bodyRows += catRow(indirectCat);
+  }
+  const periodTotal = isScs ? (inv.scsTotal||0) : inv.total;
+  const cumTotal = cumulativeShareTotal(g, isScs);
+  const prevRequested = cumTotal - periodTotal;
+  return `<div class="inv-table-wrap"><table class="inv-table" style="width:100%;">
+      <colgroup><col style="width:46%;"><col style="width:27%;"><col style="width:27%;"></colgroup>
+      <thead><tr><th colspan="3">${heading}</th></tr><tr><th>Category</th><th style="text-align:right;">This Period</th><th style="text-align:right;">Cumulative to Date</th></tr></thead>
+      <tbody>${bodyRows}</tbody>
+    </table></div>
+    <div class="inv-table-wrap"><table class="inv-table" style="width:100%;">
+      <colgroup><col style="width:60%;"><col style="width:40%;"></colgroup>
+      <tbody>
+        <tr><td>Total expenditures to date</td><td style="text-align:right;">${fmtMoney(cumTotal)}</td></tr>
+        <tr><td>Less: Previous amounts requested</td><td style="text-align:right;">${fmtMoney(prevRequested)}</td></tr>
+        <tr><td><b>${nowLabel}</b></td><td style="text-align:right;"><b>${fmtMoney(periodTotal)}</b></td></tr>
+        ${extraRow||''}
+      </tbody>
+    </table></div>`;
+}
 function printInvoice(invoiceId){
   const inv = state.invoices.find(i=>i.id===invoiceId);
   const g = getGrant(inv.grantId);
   const org = state.orgSettings;
   const colgroup = '<colgroup><col style="width:60%;"><col style="width:40%;"></colgroup>';
-
-  const directCats = g.categories.filter(c=>!c.isIndirect);
-  const indirectCat = g.categories.find(c=>c.isIndirect);
-  const directRows = directCats.map(c=> `<tr><td>${esc(c.name)}</td><td style="text-align:right;">${fmtMoney(inv.amounts[c.id]||0)}</td></tr>`).join('');
-  const directTotal = directCats.reduce((s,c)=> s+Number(inv.amounts[c.id]||0),0);
-  const indirectRowHtml = indirectCat ? `<tr><td>${esc(indirectCat.name)}</td><td style="text-align:right;">${fmtMoney(inv.amounts[indirectCat.id]||0)}</td></tr>` : '';
-  const rows = indirectCat
-    ? `${directRows}<tr><td><b>Direct Total</b></td><td style="text-align:right;"><b>${fmtMoney(directTotal)}</b></td></tr>${indirectRowHtml}`
-    : directRows;
-
   const hasScs = g.scs && g.scs.enabled;
-  let scsRows = '';
-  if(hasScs){
-    const scsDirectCats = g.scs.categories.filter(c=>!c.isIndirect);
-    const scsIndirectCat = g.scs.categories.find(c=>c.isIndirect);
-    const scsDirectRows = scsDirectCats.map(c=> `<tr><td>${esc(c.name)}</td><td style="text-align:right;">${fmtMoney((inv.scsAmounts||{})[c.id]||0)}</td></tr>`).join('');
-    const scsDirectTotal = scsDirectCats.reduce((s,c)=> s+Number((inv.scsAmounts||{})[c.id]||0),0);
-    const scsIndirectRowHtml = scsIndirectCat ? `<tr><td>${esc(scsIndirectCat.name)}</td><td style="text-align:right;">${fmtMoney((inv.scsAmounts||{})[scsIndirectCat.id]||0)}</td></tr>` : '';
-    scsRows = scsIndirectCat
-      ? `${scsDirectRows}<tr><td><b>Direct Total</b></td><td style="text-align:right;"><b>${fmtMoney(scsDirectTotal)}</b></td></tr>${scsIndirectRowHtml}`
-      : scsDirectRows;
-  }
+  const inKindRow = (g.inKind && g.inKind.enabled) ? `<tr><td>In-Kind to date</td><td style="text-align:right;">${fmtMoney(totalInKindContributed(g))}</td></tr>` : '';
+
+  const federalBlock = shareBlockHTML(g, inv, false, shareLabel(g), totalRequestedLabel(g), hasScs? '' : inKindRow);
+  const nonFederalBlock = hasScs ? shareBlockHTML(g, inv, true, nonFederalLabel(g), nonFederalShortLabel(g)+' Share Now Requested', inKindRow) : '';
+
   showPrintSheet(`
     <div class="inv-header">
       <h2>Request for Reimbursement</h2>
       <div>${esc(org.orgName)}</div>
       <div>${esc(org.address||'')}</div>
+      ${org.phone? `<div>Phone: ${esc(org.phone)}</div>`:''}
       ${org.ein? `<div>EIN: ${esc(org.ein)}</div>`:''}
     </div>
-    <table class="inv-table" style="width:100%;">
+    <p style="font-size:11px;text-align:center;margin:0 0 12px;">This is a request for payment by reimbursement.</p>
+    <div class="inv-table-wrap"><table class="inv-table" style="width:100%;">
       ${colgroup}
       <tr><td><b>${funderFieldLabel(g)}</b></td><td>${esc(g.funderName)}</td></tr>
       <tr><td><b>Agreement #</b></td><td>${esc(g.agreementNumber)}</td></tr>
       <tr><td><b>Invoice #</b></td><td>${esc(inv.invoiceNumber)}</td></tr>
+      <tr><td><b>Invoice date</b></td><td>${fmtDate(inv.sentDate)}</td></tr>
       <tr><td><b>Period covered</b></td><td>${fmtDate(inv.periodFrom)} – ${fmtDate(inv.periodTo)}</td></tr>
-    </table>
-    <table class="inv-table" style="width:100%;">
-      ${colgroup}
-      <thead><tr><th colspan="2">${shareLabel(g)}</th></tr></thead>
-      <tbody>${rows}<tr><td><b>${totalRequestedLabel(g)}</b></td><td style="text-align:right;"><b>${fmtMoney(inv.total)}</b></td></tr>${(!hasScs && g.inKind && g.inKind.enabled)? `<tr><td>In-Kind to date</td><td style="text-align:right;">${fmtMoney(totalInKindContributed(g))}</td></tr>`:''}</tbody>
-    </table>
-    ${hasScs? `<table class="inv-table" style="width:100%;">
-      ${colgroup}
-      <thead><tr><th colspan="2">${nonFederalLabel(g)}</th></tr></thead>
-      <tbody>${scsRows}<tr><td><b>${nonFederalShortLabel(g)} total</b></td><td style="text-align:right;"><b>${fmtMoney(inv.scsTotal||0)}</b></td></tr>${(g.inKind && g.inKind.enabled)? `<tr><td>In-Kind to date</td><td style="text-align:right;">${fmtMoney(totalInKindContributed(g))}</td></tr>`:''}</tbody>
-    </table>` : ''}
+    </table></div>
+    ${federalBlock}
+    ${nonFederalBlock}
     ${inv.notes? `<div style="margin-top:14px;font-size:11px;"><b>Notes:</b> ${esc(inv.notes).replace(/\n/g,'<br>')}</div>` : ''}
     ${inv.signatureData? `<img src="${inv.signatureData}" style="max-width:260px;max-height:80px;display:block;margin-top:20px;">` : ''}
     <div class="sig-line">Signature of Authorized Certifying Official</div>
@@ -1716,11 +1736,11 @@ function printBudgetReport(gid){
       <tr><td><b>Total</b></td><td style="text-align:right;"><b>${fmtMoney(scsTotB)}</b></td><td style="text-align:right;"><b>${fmtMoney(scsTotE)}</b></td><td style="text-align:right;"><b>${fmtMoney(scsTotB-scsTotE)}</b></td></tr>` :
       `<tr><td><b>Total</b></td><td style="text-align:right;"><b>${fmtMoney(scsTotB)}</b></td><td style="text-align:right;"><b>${fmtMoney(scsTotE)}</b></td><td style="text-align:right;"><b>${fmtMoney(scsTotB-scsTotE)}</b></td></tr>`;
     scsSection = `<h3 style="margin-top:16px;font-size:13px;">${nonFederalLabel(g)}</h3>
-    <table class="inv-table" style="width:100%;">
+    <div class="inv-table-wrap"><table class="inv-table" style="width:100%;">
       <colgroup><col style="width:40%;"><col style="width:20%;"><col style="width:20%;"><col style="width:20%;"></colgroup>
       <thead><tr><th>Category</th><th style="text-align:right;">Budgeted</th><th style="text-align:right;">Expended</th><th style="text-align:right;">Remaining</th></tr></thead>
       <tbody>${scsRows}${scsSubtotalRows}</tbody>
-    </table>`;
+    </table></div>`;
   }
   let inKindSection = '';
   if(g.inKind && g.inKind.enabled){
@@ -1730,21 +1750,21 @@ function printBudgetReport(gid){
     }).join('');
     const inKindTotB = totalInKindBudgeted(g), inKindTotC = totalInKindContributed(g);
     inKindSection = `<h3 style="margin-top:16px;font-size:13px;">In-Kind (not included in totals above)</h3>
-    <table class="inv-table" style="width:100%;">
+    <div class="inv-table-wrap"><table class="inv-table" style="width:100%;">
       <colgroup><col style="width:40%;"><col style="width:20%;"><col style="width:20%;"><col style="width:20%;"></colgroup>
       <thead><tr><th>Item</th><th style="text-align:right;">Budgeted</th><th style="text-align:right;">Contributed</th><th style="text-align:right;">Remaining</th></tr></thead>
       <tbody>${inKindRows}<tr><td><b>Total</b></td><td style="text-align:right;"><b>${fmtMoney(inKindTotB)}</b></td><td style="text-align:right;"><b>${fmtMoney(inKindTotC)}</b></td><td style="text-align:right;"><b>${fmtMoney(inKindTotB-inKindTotC)}</b></td></tr></tbody>
-    </table>`;
+    </table></div>`;
   }
   showPrintSheet(`
     <div class="inv-header"><h2>Budget Report</h2><div>${esc(state.orgSettings.orgName)}</div>
       <div>${esc(g.funderName)} — ${esc(g.projectName)}</div><div>${esc(g.agreementNumber)}</div></div>
     <h3 style="font-size:13px;">${budgetSectionLabel(g)}</h3>
-    <table class="inv-table" style="width:100%;">
+    <div class="inv-table-wrap"><table class="inv-table" style="width:100%;">
       <colgroup><col style="width:40%;"><col style="width:20%;"><col style="width:20%;"><col style="width:20%;"></colgroup>
       <thead><tr><th>Category</th><th style="text-align:right;">Budgeted</th><th style="text-align:right;">Expended</th><th style="text-align:right;">Remaining</th></tr></thead>
       <tbody>${rows}${subtotalRows}</tbody>
-    </table>
+    </table></div>
     ${scsSection}
     ${inKindSection}
   `);
@@ -1756,10 +1776,10 @@ function printGrantsOverview(){
   }).join('');
   showPrintSheet(`
     <div class="inv-header"><h2>Grants Overview</h2><div>${esc(state.orgSettings.orgName)}</div><div>${new Date().toLocaleDateString()}</div></div>
-    <table class="inv-table" style="width:100%;">
+    <div class="inv-table-wrap"><table class="inv-table" style="width:100%;">
       <thead><tr><th>Funder</th><th>Project</th><th>Agreement #</th><th>Status</th><th style="text-align:right;">Budgeted</th><th style="text-align:right;">Expended</th><th style="text-align:right;">Remaining</th></tr></thead>
       <tbody>${rows||'<tr><td colspan="7">No grants yet.</td></tr>'}</tbody>
-    </table>
+    </table></div>
   `);
 }
 function printReimbursementReport(){
@@ -1781,7 +1801,7 @@ function printReimbursementReport(){
     const indirect = items.reduce((s,i)=>s+i.indirectAmt,0);
     const rows = items.map(i=> `<tr><td>${esc(i.name)}</td><td>${esc(i.invoiceNumber)}</td><td style="text-align:right;">${fmtMoney(i.amount)}</td><td style="text-align:right;">${fmtMoney(i.indirectAmt)}</td><td>${fmtDate(i.sentDate)}</td><td>${i.receivedDate? fmtDate(i.receivedDate):'pending'}</td></tr>`).join('');
     return `<h3 style="margin-top:18px;font-size:13px;">${esc(label)} — ${fmtMoney(total)} requested (${fmtMoney(indirect)} of that is indirect)</h3>
-      <table class="inv-table" style="width:100%;"><thead><tr><th>Grant / Billed to</th><th>Inv #</th><th style="text-align:right;">Total</th><th style="text-align:right;">Indirect</th><th>Sent</th><th>Received</th></tr></thead><tbody>${rows}</tbody></table>`;
+      <div class="inv-table-wrap"><table class="inv-table" style="width:100%;"><thead><tr><th>Grant / Billed to</th><th>Inv #</th><th style="text-align:right;">Total</th><th style="text-align:right;">Indirect</th><th>Sent</th><th>Received</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   }).join('');
   showPrintSheet(`<div class="inv-header"><h2>Reimbursement/Invoice Report</h2><div>${esc(state.orgSettings.orgName)}</div><div>${new Date().toLocaleDateString()}</div></div>${body || '<p>No invoices recorded yet.</p>'}`);
 }
@@ -2189,18 +2209,18 @@ function printStandaloneInvoice(id){
       <div>${esc(org.address||'')}</div>
       ${org.ein? `<div>EIN: ${esc(org.ein)}</div>`:''}
     </div>
-    <table class="inv-table" style="width:100%;">
+    <div class="inv-table-wrap"><table class="inv-table" style="width:100%;">
       <colgroup><col style="width:60%;"><col style="width:40%;"></colgroup>
       <tr><td><b>Billed to</b></td><td>${esc(s.billedTo)}</td></tr>
       <tr><td><b>Invoice #</b></td><td>${esc(s.invoiceNumber)}</td></tr>
       <tr><td><b>Date</b></td><td>${fmtDate(s.sentDate)}</td></tr>
       <tr><td><b>Amount</b></td><td style="text-align:right;">${fmtMoney(s.amount)}</td></tr>
-    </table>
-    <table class="inv-table" style="width:100%;">
+    </table></div>
+    <div class="inv-table-wrap"><table class="inv-table" style="width:100%;">
       <colgroup><col style="width:60%;"><col style="width:40%;"></colgroup>
       <thead><tr><th colspan="2">What it's for</th></tr></thead>
       <tbody><tr><td colspan="2">${esc(s.description)||'—'}</td></tr></tbody>
-    </table>
+    </table></div>
     ${s.notes? `<div style="margin-top:14px;font-size:11px;"><b>Notes:</b> ${esc(s.notes).replace(/\n/g,'<br>')}</div>` : ''}
     <div class="sig-line">Signature / Date</div>
     <div class="sig-line" style="margin-top:30px;">Printed Name and Title</div>
@@ -2227,6 +2247,7 @@ function renderAdmin(){
       <div class="field"><label>EIN</label><input id="org-ein" value="${escAttr(state.orgSettings.ein)}"></div>
     </div>
     <div class="field"><label>Address (for printed invoices)</label><input id="org-address" value="${escAttr(state.orgSettings.address)}"></div>
+    <div class="field" style="max-width:260px;"><label>Phone (for printed invoices)</label><input id="org-phone" value="${escAttr(state.orgSettings.phone||'')}"></div>
     <div class="field"><label>Fiscal year start month (1=Jan, 10=Oct for federal FY)</label>
       <select id="org-fy">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${state.orgSettings.fyStartMonth===m?'selected':''}>${m}</option>`).join('')}</select>
     </div>
@@ -2247,6 +2268,7 @@ function attachAdminEvents(){
     state.orgSettings.orgName = document.getElementById('org-name').value.trim();
     state.orgSettings.ein = document.getElementById('org-ein').value.trim();
     state.orgSettings.address = document.getElementById('org-address').value.trim();
+    state.orgSettings.phone = document.getElementById('org-phone').value.trim();
     state.orgSettings.fyStartMonth = Number(document.getElementById('org-fy').value);
     await saveOrgSettings(state.orgSettings);
     alert('Settings saved.');
