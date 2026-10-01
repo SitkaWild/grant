@@ -136,7 +136,7 @@
   /* print view */
   #printSheet{display:none;}
   @media print{
-    @page{ size: portrait; margin: 0.5in; }
+    @page{ size: portrait; margin: 0.35in; }
     #root{display:none !important;}
     .modal-bg{display:none !important;}
     #printSheet{display:block !important;position:static;width:100%;padding:20px;margin:0;}
@@ -144,9 +144,9 @@
   }
   .inv-header{text-align:center;margin-bottom:18px;}
   .inv-header h2{font-size:16px;}
-  .inv-table-wrap{page-break-inside:avoid;break-inside:avoid;display:inline-block;width:100%;}
-  .inv-table{width:100%;margin:14px 0;border-collapse:collapse;}
-  .inv-table td, .inv-table th{border:1px solid #999;padding:6px 8px;}
+  .inv-table-wrap{page-break-inside:avoid;break-inside:avoid;display:inline-block;width:100%;border:1.5px solid #888;margin:14px 0;}
+  .inv-table{width:100%;margin:0;border-collapse:collapse;}
+  .inv-table td, .inv-table th{border:1px solid #999;padding:4px 8px;}
   .sig-line{border-top:1px solid #333;margin-top:40px;padding-top:4px;font-size:11px;width:340px;white-space:nowrap;}
 </style>
 </head>
@@ -1660,7 +1660,7 @@ function shareBlockHTML(g, inv, isScs, heading, nowLabel, extraRow){
   const cumTotal = cumulativeShareTotal(g, isScs);
   const prevRequested = cumTotal - periodTotal;
   return `<div class="inv-table-wrap"><table class="inv-table" style="width:100%;">
-      <colgroup><col style="width:50%;"><col style="width:25%;"><col style="width:25%;"></colgroup>
+      <colgroup><col style="width:36%;"><col style="width:32%;"><col style="width:32%;"></colgroup>
       <thead><tr><th colspan="3">${heading}</th></tr><tr><th>Category</th><th style="text-align:right;">This Period</th><th style="text-align:right;">Cumulative to Date</th></tr></thead>
       <tbody>${bodyRows}</tbody>
     </table></div>
