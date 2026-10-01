@@ -142,12 +142,12 @@
     #printSheet{display:block !important;position:static;width:100%;padding:20px;margin:0;}
     html, body{height:auto !important;margin:0;padding:0;}
   }
-  .inv-header{text-align:center;margin-bottom:18px;}
+  .inv-header{text-align:center;margin-bottom:10px;}
   .inv-header h2{font-size:16px;}
-  .inv-table-wrap{page-break-inside:avoid;break-inside:avoid;display:inline-block;width:100%;border:1.5px solid #888;margin:14px 0;}
+  .inv-table-wrap{page-break-inside:avoid;break-inside:avoid;display:inline-block;width:100%;border:1.5px solid #888;margin:7px 0;}
   .inv-table{width:100%;margin:0;border-collapse:collapse;}
   .inv-table td, .inv-table th{border:1px solid #999;padding:4px 8px;}
-  .sig-line{border-top:1px solid #333;margin-top:40px;padding-top:4px;font-size:11px;width:340px;white-space:nowrap;}
+  .sig-line{border-top:1px solid #333;margin-top:26px;padding-top:4px;font-size:11px;width:340px;white-space:nowrap;}
 </style>
 </head>
 <body>
@@ -1688,7 +1688,6 @@ function printInvoice(invoiceId){
       ${org.phone? `<div>Phone: ${esc(org.phone)}</div>`:''}
       ${org.ein? `<div>EIN: ${esc(org.ein)}</div>`:''}
     </div>
-    <p style="font-size:11px;text-align:center;margin:0 0 12px;">This is a request for payment by reimbursement.</p>
     <div class="inv-table-wrap"><table class="inv-table" style="width:100%;">
       ${colgroup}
       <tr><td><b>${funderFieldLabel(g)}</b></td><td>${esc(g.funderName)}</td></tr>
@@ -1700,11 +1699,11 @@ function printInvoice(invoiceId){
     ${federalBlock}
     ${nonFederalBlock}
     ${inv.notes? `<div style="margin-top:14px;font-size:11px;"><b>Notes:</b> ${esc(inv.notes).replace(/\n/g,'<br>')}</div>` : ''}
-    ${inv.signatureData? `<img src="${inv.signatureData}" style="max-width:260px;max-height:80px;display:block;margin-top:20px;">` : ''}
-    <div class="sig-line">Signature of Authorized Certifying Official</div>
-    ${inv.signatureDate? `<div style="font-size:10px;color:#555;margin-top:3px;">Date: ${fmtDate(inv.signatureDate)}</div>` : ''}
-    <div style="margin-top:30px;font-size:11px;">${inv.signerName? esc(inv.signerName)+(inv.signerTitle? ', '+esc(inv.signerTitle):'') : '\u00A0'}</div>
-    <div class="sig-line" style="margin-top:2px;">Printed Name and Title</div>
+    ${inv.signatureData? `<img src="${inv.signatureData}" style="max-width:260px;max-height:80px;display:block;margin-top:14px;">` : ''}
+    <div style="border-top:1px solid #333;margin-top:10px;padding-top:4px;width:100%;display:flex;justify-content:space-between;font-size:11px;">
+      <span>${inv.signerName? esc(inv.signerName)+(inv.signerTitle? ', '+esc(inv.signerTitle):'') : '\u00A0'}</span>
+      <span>${inv.signatureDate? 'Date: '+fmtDate(inv.signatureDate) : ''}</span>
+    </div>
   `);
 }
 function printBudgetReport(gid){
